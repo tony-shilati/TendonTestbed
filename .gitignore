@@ -1,0 +1,16 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# VSCode
+.vscode/*
+!.vscode/extensions.json
+
+# OS content
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db

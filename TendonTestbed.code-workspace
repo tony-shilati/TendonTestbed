@@ -1,0 +1,17 @@
+{
+    "folders": [
+        {
+            "name": "TendonTestbed (root)",
+            "path": "."
+        },
+        {
+            "name": "Shared Libraries",
+            "path": "shared"
+        },
+        {
+            "name": "AS5047P Lib Dev",
+            "path": "AS5047P Lib Dev"
+        }
+    ],
+    "settings": {}
+}

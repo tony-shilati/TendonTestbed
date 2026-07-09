@@ -12,8 +12,13 @@
 
 // Frame bitmasks
 #define AS5047P_READ_BIT    (1 << 14)   // 1 = read, 0 = write
+#define AS5047P_WRITE_BIT   (0 << 14)   // 1 = read, 0 = write
 #define AS5047P_PARITY_BIT  (1 << 15)   // even parity overbits 14:0
 #define AS5047P_ERROR_BIT   (1 << 14)   // error flag in response
+
+
+
+// Header Functions
 
 // Calculate parity over 14:0 bits
 static inline uint16_t as5047p_parity(uint16_t val){
@@ -22,10 +27,44 @@ static inline uint16_t as5047p_parity(uint16_t val){
     while (val){        // while val not equal to zero, which keeps us 
                         // going until all 1's have been accoutned for.
 
-        p ^= (val & 1); // isolate lowest bit of val, then XOR into p
+        parity ^= (val & 1); // isolate lowest bit of val, then XOR into p
         val >>= 1;      // shift all bits of val
     }
     return parity;
+}
+
+// Build a read command frame given a register (bit 14 = 1)
+static inline uint16_t as5047p_read_frame(uint16_t reg){
+    uint16_t frame = AS5047P_READ_BIT | (reg & 0x3FFF);     // combine read 
+                                                            // bit and address
+                                                            // at 14 bits
+    if (as5047p_parity(frame)){     // if parity must be added
+        frame |= AS5047P_PARITY_BIT;        // add parity          
+    }
+    return frame;
+}
+
+// Build a write command frame given a register (bit 14 = 0)
+static inline uint16_t as5047p_write_frame(uint16_t reg){
+    uint16_t frame = AS5047P_READ_BIT | (reg & 0x3FFF);     // combine read 
+                                                            // bit and address
+                                                            // at 14 bits
+    if (as5047p_parity(frame)){     // if parity must be added
+        frame |= AS5047P_PARITY_BIT;        // add parity          
+    }
+    return frame;
+}
+
+static inline int16_t as5047p_read_reg(uint8_t cs_pin, uint16_t reg){
+    uint16_t command = as5047p_read_frame(reg);     // build the read command to transfer
+
+    // send read command to ask for data
+    digitalWrite(cs_pin, LOW);      // spi mode 1, low = selected
+    SPI.transfer16(command);        // send our command to the chip
+    digitalWrite(cs_pin, HIGH);     // release chip
+
+    // unfinished
+
 }
 
 

@@ -1,7 +1,9 @@
 #include <Arduino.h>
 #include "ODriveCAN.h"
+#include "AS5047P.h"
 
 // Modified Example Code derived from ODrive's Website
+// Used for creating AS5047P library
 
 // Documentation for this example can be found here:
 // https://docs.odriverobotics.com/v/latest/guides/arduino-can-guide.html
@@ -19,6 +21,10 @@
 // See also "Board-specific settings" to adapt the details for your hardware setup.
 
 #define IS_TEENSY_BUILTIN // Teensy boards with built-in CAN interface (e.g. Teensy 4.1). See below to select which interface to use.
+
+// Pin Defines
+
+#define CS_PIN 10
 
 /* Board-specific includes ---------------------------------------------------*/
 
@@ -66,6 +72,8 @@ bool setupCan() {
 
 /* Example sketch ------------------------------------------------------------*/
 
+// Global Defines
+
 // Instantiate ODrive objects
 ODriveCAN odrv0(wrap_can_intf(can_intf), ODRV0_NODE_ID); // Standard CAN message ID
 ODriveCAN* odrives[] = {&odrv0}; // Make sure all ODriveCAN instances are accounted for here
@@ -98,8 +106,9 @@ void onFeedback(Get_Encoder_Estimates_msg_t& msg, void* user_data) {
 
 // Called for every message that arrives on the CAN bus
 void onCanMessage(const CanMsg& msg) {
-  Serial.print("CAN msg received, id: 0x");
-  Serial.println(msg.id, HEX);
+  //CAN debug messages
+  //Serial.print("CAN msg received, id: 0x");
+  //Serial.println(msg.id, HEX);
   
   for (auto odrive: odrives) {
     onReceive(msg, *odrive);
@@ -109,7 +118,7 @@ void onCanMessage(const CanMsg& msg) {
 void setup() {
   Serial.begin(115200);
 
-  // Wait for up to 3 seconds for the serial port to be opened on the PC side.
+  // Wait for up to 6 seconds for the serial port to be opened on the PC side.
   // If no PC connects, continue anyway.
   for (int i = 0; i < 60 && !Serial; ++i) {
     delay(100);
@@ -167,6 +176,15 @@ void setup() {
       delay(10);
       pumpEvents(can_intf);
     }
+
+    Serial.println("Setting up AS5047P Encoder...");
+    SPI.begin();
+    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE1));
+    pinMode(CS_PIN, OUTPUT);
+    digitalWrite(CS_PIN, HIGH);
+
+    //TODO: Verify that encoder reads and writes here.
+
   }
 
   Serial.println("ODrive running!");
@@ -204,7 +222,10 @@ void loop() {
     amplitude * cos(phase) * (TWO_PI / SINE_PERIOD) // velocity feedforward (optional)
   );
 
+
+
   // print position and velocity for Serial Plotter
+  /*
   if (odrv0_user_data.received_feedback) {
     Get_Encoder_Estimates_msg_t feedback = odrv0_user_data.last_feedback;
     odrv0_user_data.received_feedback = false;
@@ -214,4 +235,5 @@ void loop() {
     Serial.print("odrv0-vel:");
     Serial.println(feedback.Vel_Estimate);
   }
+    */
 }

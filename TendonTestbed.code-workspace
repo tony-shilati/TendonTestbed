@@ -9,7 +9,11 @@
             "path": "shared"
         },
         {
-            "name": "AS5047P Lib Dev",
+            "name": "AS5047P Verification",
+            "path": "AS5047P_Verification"
+        },
+        {
+            "name": "(Deprecated) AS5047P Lib Dev",
             "path": "AS5047P Lib Dev"
         }
     ],

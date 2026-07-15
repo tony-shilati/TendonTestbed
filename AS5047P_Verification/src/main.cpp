@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "ODriveCAN.h"
-#include "AS5047P.h"
+#include "encoder.hpp"
+#include "spi_encoder.hpp"
 
 // Modified Example Code derived from ODrive's Website
 // Used for creating AS5047P library
@@ -90,6 +91,9 @@ ODriveUserData odrv0_user_data;
 
 float center = 0.0f;
 
+SPIEncoder* AS5047P = nullptr;
+Angle encoder_angle;  // rotations=0, radians=0, direction=1 by default
+
 // Called every time a Heartbeat message arrives from the ODrive
 void onHeartbeat(Heartbeat_msg_t& msg, void* user_data) {
   ODriveUserData* odrv_user_data = static_cast<ODriveUserData*>(user_data);
@@ -160,6 +164,12 @@ void setup() {
   Serial.println(vbus.Bus_Current);
 
   Serial.println("Enabling closed loop control...");
+
+  Serial.println("Setting up AS5047P Encoder...");
+  pinMode(CS_PIN, OUTPUT);
+  digitalWrite(CS_PIN, HIGH);
+  AS5047P = new SPIEncoder(EncoderReadCmd, SPI, CS_PIN);
+  
   while (odrv0_user_data.last_heartbeat.Axis_State != ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL) {
     odrv0.clearErrors();
     delay(1);
@@ -176,14 +186,6 @@ void setup() {
       delay(10);
       pumpEvents(can_intf);
     }
-
-    /*
-    Serial.println("Setting up AS5047P Encoder...");
-    SPI.begin();
-    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE1));
-    pinMode(CS_PIN, OUTPUT);
-    digitalWrite(CS_PIN, HIGH);
-    */
 
     //TODO: Verify that encoder reads and writes here.
 
@@ -224,6 +226,21 @@ void loop() {
     amplitude * cos(phase) * (TWO_PI / SINE_PERIOD) // velocity feedforward (optional)
   );
 
+    // Read and print encoder angle
+    uint16_t raw = AS5047P->read_raw();
+    Serial.print("raw_hex:0x");
+    Serial.print(raw, HEX);
+    Serial.print(",raw:");
+    Serial.println(raw);
+
+    if (raw != 0 && raw != 16383) {
+      float radians = (raw / 16383.0f) * TWO_PI;
+      encoder_angle.update_angle(radians);
+    }
+    Serial.print("odrv0-pos:");
+    Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
+    Serial.print(",encoder-angle:");
+    Serial.println(encoder_angle.get_full_angle());
 
 
   // print position and velocity for Serial Plotter

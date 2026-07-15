@@ -16,7 +16,7 @@ struct Angle
 
   float get_full_angle() const
   {
-    return static_cast<float>(direction) * (static_cast<float>(rotations) * M_2_PI + radians);
+    return static_cast<float>(direction) * (static_cast<float>(rotations) * TWO_PI + radians);
   }
 
   float get_angle() const

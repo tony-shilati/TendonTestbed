@@ -47,19 +47,19 @@ public:
       return angle_;  // error: return last valid unwrapped angle
     }
     float raw = static_cast<float>(r) / static_cast<float>(max_read_ - 1)
-                * static_cast<float>(M_2_PI);
+                * static_cast<float>(TWO_PI);
     if (initialized_) {
       float delta = raw - prev_raw_;
-      if (delta > static_cast<float>(M_2_PI) * 0.5f) {
+      if (delta > static_cast<float>(TWO_PI) * 0.5f) {
         wrap_count_--;
-      } else if (delta < -static_cast<float>(M_2_PI) * 0.5f) {
+      } else if (delta < -static_cast<float>(TWO_PI) * 0.5f) {
         wrap_count_++;
       }
     } else {
       initialized_ = true;
     }
     prev_raw_ = raw;
-    angle_ = raw + static_cast<float>(wrap_count_) * static_cast<float>(M_2_PI);
+    angle_ = raw + static_cast<float>(wrap_count_) * static_cast<float>(TWO_PI);
     return angle_;
   }
 

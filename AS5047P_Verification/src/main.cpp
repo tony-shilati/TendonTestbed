@@ -214,6 +214,8 @@ void loop() {
                         // for applications requiring loop times over 100Hz.
                         // Enabled because of Teensy + FlexCAN Implementation
 
+  static uint32_t last_print = 0;
+
   float SINE_PERIOD = 10.0f; // Period of the position command sine wave in seconds
   float amplitude = 10.0f;
 
@@ -226,22 +228,22 @@ void loop() {
     amplitude * cos(phase) * (TWO_PI / SINE_PERIOD) // velocity feedforward (optional)
   );
 
-    // Read and print encoder angle
+    // Read encoder angle
     uint16_t raw = AS5047P->read_raw();
-    Serial.print("raw_hex:0x");
-    Serial.print(raw, HEX);
-    Serial.print(",raw:");
-    Serial.println(raw);
 
     if (raw != 0 && raw != 16383) {
       float radians = (raw / 16383.0f) * TWO_PI;
       encoder_angle.update_angle(radians);
     }
-    Serial.print("odrv0-pos:");
-    Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
-    Serial.print(",encoder-angle:");
-    Serial.println(encoder_angle.get_full_angle());
 
+    // print every 100(ish) ms
+    if (millis() - last_print >= 100) {
+      last_print = millis();
+      Serial.print("odrv0-pos:");
+      Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
+      Serial.print(",encoder-angle:");
+      Serial.println(encoder_angle.get_full_angle());
+    }
 
   // print position and velocity for Serial Plotter
   /*

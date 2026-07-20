@@ -9,8 +9,8 @@
             "path": "shared"
         },
         {
-            "name": "AS5047P Verification",
-            "path": "AS5047P_Verification"
+            "name": "AS5047P Calibration",
+            "path": "AS5047P_Calibration"
         },
         {
             "name": "(Deprecated) AS5047P Lib Dev",

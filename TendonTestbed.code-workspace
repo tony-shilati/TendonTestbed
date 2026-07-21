@@ -13,6 +13,10 @@
             "path": "AS5047P_Calibration"
         },
         {
+            "name": "MATLAB Simulink Models",
+            "path": "Simulink"
+        },
+        {
             "name": "(Deprecated) AS5047P Lib Dev",
             "path": "AS5047P Lib Dev"
         }

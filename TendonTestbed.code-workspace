@@ -9,6 +9,10 @@
             "path": "shared"
         },
         {
+            "name": "Load Cell Calibration",
+            "path": "load_cell_calibration_ADS1220"
+        },
+        {
             "name": "AS5047P Calibration",
             "path": "AS5047P_Calibration"
         },

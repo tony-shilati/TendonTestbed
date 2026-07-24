@@ -15,3 +15,15 @@
 .AppleDouble
 .LSOverride
 Thumbs.db
+
+# MATLAB / Simulink
+slprj/
+*.slxc
+*.mex*
+*.asv
+*.autosave
+codegen/
+*.cache
+work/
+html/
+*.zip

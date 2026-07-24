@@ -27,3 +27,30 @@ codegen/
 work/
 html/
 *.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.venv
+env/
+venv/
+*.egg-info/
+dist/
+build/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# CircuitPython
+*.mpy
+.fseventsd/
+.Spotlight-V100/
+.Trashes/
+CIRCUITPY/
+boot_out.txt

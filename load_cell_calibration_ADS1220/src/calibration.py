@@ -20,9 +20,11 @@ CALIBRATION_CSV = "calibration.csv"
 #----------------------------------------------------------------------
 
 
-# Reads one raw ADC value from serial
+
 def read_raw_value(ser):
-    # attempt a read
+    "Reads and returns one raw ADC value from serial. Blocks until then."
+
+    #attempt a read
     #keep looping until successful or fails
     while True:
         try:
@@ -51,8 +53,9 @@ def read_raw_value(ser):
             print(error)
             continue
 
-# load existing calibration points from CSV -- if it exists. If not, return empty lists
+
 def load_existing_calibrations():
+    "Load existing calibration points from CSV -- if it exists. If not, return empty lists to start fresh."
     #default to empty initialization
     true_weights, raw_means, raw_stds = [], [], []
 
@@ -62,7 +65,7 @@ def load_existing_calibrations():
 
    #if csv exists, notify and try to read all data
     print(f"Found existing {CALIBRATION_CSV}. Loading points...")
-    with open(CALIBRATION_CSV, newline = "")
+    with open(CALIBRATION_CSV, newline = "") as f:
         reader = csv.DictReader(f)
         
         #read all rows
@@ -84,6 +87,25 @@ def load_existing_calibrations():
 
     return true_weights, raw_means, raw_stds
 
+# collect a certain number of samples, in accordance with NUM_SAMPLES. Returns a mean and std.
+def collect_samples(ser, sample_num):
+    "Collect NUM_SAMPLES readings. Returns (mean, std)."
+    
+    #collect samples to average later
+    raw_vals = []
+    for sample in range(sample_num):
+        _, y = read_raw_value(ser)      #ignoring time, for now.
+        raw_vals.append(y)
+
+        #fun reporting every 10 samples
+        if len(raw_vals) % 10 == 0:
+            print(".", end="", flush=True)
+
+    print()     # new line
+    mean = np.mean(raw_vals)
+    std = np.std(raw_vals)
+    print(f"Mean: {mean:.2f}    STD: {std:.2f}")
+    return mean, std
 
 
 def main():
@@ -170,8 +192,26 @@ def main():
             print("Data Report:")
             for weight, mean, std in zip(true_weights, raw_means, raw_stds):
                 print(f"{weight:.1f}g -> raw {mean:.2f} +/- {std:.2f}")
+
+            #next loop
+            continue
         
-        
+        #at this point, it's invalid or it's a number
+
+        else:
+            #try to make it a float
+            try:
+                new_true_weight = float(cmd)
+
+            #if it's not a number, it's invalid
+            except ValueError:
+                print("Invalid input.")
+                continue
+
+            input(f"Place {new_true_weight}g on calibrator, then press Enter.")
+            ser.reset_input_buffer()
+
+            mean, std = collect_samples(ser, NUM_SAMPLES)
 
 
 

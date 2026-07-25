@@ -29,27 +29,23 @@ def read_raw_value(ser):
     #keep looping until successful or fails
     while True:
         try:
-            line = ""
             #Read a line, waits for a \n
             #skip to latest reading in case of buffer build-up
-            while ser.in_waiting > 0:
-                line = ser.readline().decode("utf-8").strip()
+            # block until a complete \n terminated line arrives
+            line = ser.readline().decode("utf-8").strip()
             
-            # if theres no line read, loop for the next one
             if not line:
-                time.sleep(0.01)
-                continue
+                continue  # timeout with no data, try again
 
             segments = line.split()
 
             try:
-                # Extract Raw values and times from the serial line read
-                x = float(segments[segments.index(f"time:") + 1])
-                y = float(segments[segments.index(f"raw:") + 1])
+                x = float(segments[segments.index("time:") + 1])
+                y = float(segments[segments.index("raw:") + 1])
                 return x, y
 
             except (ValueError, IndexError):
-                continue #bad parse, try again for the next line
+                continue  # bad parse, try next line
 
         except Exception as error:
             print(error)
@@ -93,27 +89,12 @@ def load_existing_calibrations():
 def collect_samples(ser, sample_num):
     "Collect NUM_SAMPLES readings. Returns (mean, std)."
 
-    #set up live plot
-    live_plot = PointsInSpace(
-        "Live Samples",
-        xlabel = "Sample #",
-        ylabel = "Raw ADC",
-        xlim = [0, sample_num],
-        ylim = [10000, 20000],
-        enable_grid = True
-    )
-    live_plot.register_plot("raw", m="o", alpha=0.5)
-
     raw_vals = []
     print(f"Collecting {sample_num} samples", end="", flush=True)
 
     for sample in range(sample_num):
         _, y = read_raw_value(ser)      #ignoring time, for now.
         raw_vals.append(y)
-
-        live_plot.start_drawing()
-        live_plot.draw_points("raw", list(range(len(raw_vals))), raw_vals)
-        live_plot.end_drawing()
 
         #fun reporting every 10 samples
         if len(raw_vals) % 10 == 0:
@@ -123,6 +104,21 @@ def collect_samples(ser, sample_num):
     mean = np.mean(raw_vals)
     std = np.std(raw_vals)
     print(f"Mean: {mean:.2f}    STD: {std:.2f}")
+
+    # show static plot of this collection after done
+    plt.figure(figsize=(6, 3))
+    plt.plot(raw_vals, 'o', alpha=0.5, markersize=3)
+    plt.axhline(mean, color='r', label=f"Mean: {mean:.2f}")
+    plt.axhline(mean + std, color='orange', linestyle='--', label=f"±STD: {std:.2f}")
+    plt.axhline(mean - std, color='orange', linestyle='--')
+    plt.xlabel("Sample #")
+    plt.ylabel("Raw ADC")
+    plt.title("Collected Samples")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show(block=False)   # non-blocking — continues to input prompt
+    plt.pause(0.5)
     return mean, std
 
 
@@ -224,7 +220,7 @@ def main():
 
     print("*-*-* Load Cell Calibration Tool *-*-*")
     print(f"Collecting {NUM_SAMPLES} samples per point.")
-    print("Usage Options: \n 1. Enter a weight in grams to add datapoint to existing calibration data.")
+    print("Usage Options: \n1. Enter a weight in grams to add datapoint to existing calibration data.")
     print("2. 'undo' to remove the last point.")
     print("3. 'report' to show all statistics collected so far.")
     print("4. 'clear' to start fresh.")

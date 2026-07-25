@@ -1,4 +1,4 @@
-""""
+"""
 Load cEll calibration script.
 Records ADC readings at known weights, fits a linear calibration curve.
 """
@@ -10,6 +10,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from com_ports import serial_ports
+from rendering import PointsInSpace
 
 # Settings
 #----------------------------------------------------------------------
@@ -36,6 +37,7 @@ def read_raw_value(ser):
             
             # if theres no line read, loop for the next one
             if not line:
+                time.sleep(0.01)
                 continue
 
             segments = line.split()
@@ -90,12 +92,28 @@ def load_existing_calibrations():
 # collect a certain number of samples, in accordance with NUM_SAMPLES. Returns a mean and std.
 def collect_samples(ser, sample_num):
     "Collect NUM_SAMPLES readings. Returns (mean, std)."
-    
-    #collect samples to average later
+
+    #set up live plot
+    live_plot = PointsInSpace(
+        "Live Samples",
+        xlabel = "Sample #",
+        ylabel = "Raw ADC",
+        xlim = [0, sample_num],
+        ylim = [10000, 20000],
+        enable_grid = True
+    )
+    live_plot.register_plot("raw", m="o", alpha=0.5)
+
     raw_vals = []
+    print(f"Collecting {sample_num} samples", end="", flush=True)
+
     for sample in range(sample_num):
         _, y = read_raw_value(ser)      #ignoring time, for now.
         raw_vals.append(y)
+
+        live_plot.start_drawing()
+        live_plot.draw_points("raw", list(range(len(raw_vals))), raw_vals)
+        live_plot.end_drawing()
 
         #fun reporting every 10 samples
         if len(raw_vals) % 10 == 0:
@@ -108,7 +126,7 @@ def collect_samples(ser, sample_num):
     return mean, std
 
 
-def save_calibration(true_weights, raw_means, raw_stds, scale, offset):
+def save_calibration(true_weights, raw_means, raw_stds, scale, offset, r_squared = None):
     "Write all calibration data & fit results to CSV."
     with open(CALIBRATION_CSV, "w", newline="") as f:
         writer = csv.writer(f)
@@ -122,7 +140,56 @@ def save_calibration(true_weights, raw_means, raw_stds, scale, offset):
         writer.writerow([])
         writer.writerow(["scale", scale])
         writer.writerow(["offset", offset])
+        if r_squared is not None:
+            writer.writerow(["r_squared", r_squared])
     print(f"Saved {len(true_weights)} points & fit to {CALIBRATION_CSV}")
+
+def fit_and_plot(true_weights, raw_means, raw_stds):
+    "Fit a line and plot the calibration curve."
+    true_weights = np.array(true_weights)
+    raw_means    = np.array(raw_means)
+    raw_stds     = np.array(raw_stds)
+
+    coeffs = np.polyfit(raw_means, true_weights, 1)
+    scale, offset = coeffs
+
+    print("\n*-*-* Calibration Results *-*-*")
+    print(f"  scale  = {scale:.8f}")
+    print(f"  offset = {offset:.4f}")
+    print(f"  weight = {scale:.8f} * raw + ({offset:.4f})")
+
+    # Residuals
+    predicted = np.polyval(coeffs, raw_means)
+    residuals = true_weights - predicted
+
+    #r^2 reporting
+    ss_res = np.sum(residuals ** 2)     # sum of squared residuals
+    ss_tot = np.sum((true_weights - np.mean(true_weights)) ** 2)     #total variance
+    r_squared = 1 - (ss_res / ss_tot)
+
+    print(f"Max residual: {np.max(np.abs(residuals)):.4f}g")
+    print(f"R^2: {r_squared:.6f}")
+
+    # Plot
+    fit_x = np.linspace(raw_means.min(), raw_means.max(), 200)
+    fit_y = np.polyval(coeffs, fit_x)
+
+    plt.figure(figsize=(8, 5))
+    plt.errorbar(raw_means, true_weights, xerr=raw_stds,
+                 fmt='o', capsize=5, label="Calibration points")
+    plt.plot(fit_x, fit_y, '-',
+             label=f"Fit: y = {scale:.4f}x + {offset:.2f}  |  R²={r_squared:.4f}")
+    plt.xlabel("Raw ADC Reading")
+    plt.ylabel("True Weight (g)")
+    plt.title("Load Cell Calibration Curve")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("calibration_curve.png")   # ← add this before show()
+    print("Saved plot to calibration_curve.png")
+    plt.show()
+
+    return scale, offset, r_squared
 
 
 def main():
@@ -173,7 +240,7 @@ def main():
         # done
         if cmd == "done":
             if len(true_weights) < 2:
-                print("Need at least 2 calibration points. You currently have ");;;
+                print(f"Need at least 2 calibration points. You currently have {len(true_weights)}.")
                 #next loop
                 continue
 
@@ -185,7 +252,7 @@ def main():
                 removed = true_weights.pop()
                 raw_means.pop()
                 raw_stds.pop()
-                print(f"Removed {removed}g. You have {len(true_weights)}) points now.")
+                print(f"Removed {removed}g. You have {len(true_weights)} points now.")
 
             else:
                 print("Nothing to undo.")
@@ -205,7 +272,12 @@ def main():
             continue
 
         elif cmd == "report":
-        #print the data nicely
+
+            if not true_weights:
+                print("No data collected yet.")
+                continue
+
+            #print the data nicely
             print("Data Report:")
             for weight, mean, std in zip(true_weights, raw_means, raw_stds):
                 print(f"{weight:.1f}g -> raw {mean:.2f} +/- {std:.2f}")
@@ -213,8 +285,8 @@ def main():
             #next loop
             continue
         
-        #at this point, it's invalid or it's a number
 
+        #at this point, it's invalid or it's a number
         else:
             #try to make it a float
             try:
@@ -240,17 +312,29 @@ def main():
             #temp fit if possible
             if len(true_weights) >= 2:
                 temp_coefficients = np.polyfit(raw_means, true_weights, 1)
-                save_calibration(true_weights, raw_means, raw_stds, temp_coefficients[0], temp_coefficients[1])
+                # compute r^2 for temp save
+                predicted = np.polyval(temp_coefficients, raw_means)
+                residuals = np.array(true_weights) - predicted
+                ss_res = np.sum(residuals ** 2)
+                ss_tot = np.sum((np.array(true_weights) - np.mean(true_weights)) ** 2)
+                temp_r2 = 1 - (ss_res / ss_tot)
+                save_calibration(true_weights, raw_means, raw_stds,
+                                 temp_coefficients[0], temp_coefficients[1], temp_r2)
 
             #save without a fit
             else:
+                with open(CALIBRATION_CSV, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["true_weight_grams", "raw_mean", "raw_std"])
+                    for w, m, s in zip(true_weights, raw_means, raw_stds):
+                        writer.writerow([w, m, s])
+                print(f"  Saved to {CALIBRATION_CSV} (need 1 more point to fit)")
 
+    ser.close()
 
-
-
-        #check menu options
-        #num, report, clear, undo, done
-
+    #Final fit & plot
+    scale, offset, r_squared = fit_and_plot(true_weights, raw_means, raw_stds)
+    save_calibration(true_weights, raw_means, raw_stds, scale, offset, r_squared)
 
 if __name__ == "__main__":
     main()

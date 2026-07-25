@@ -59,14 +59,17 @@ void loop() {
     //    Wait for DRDY to go LOW (conversion ready)
     while (digitalRead(DRDY_PIN)) {}
 
-    // Calibrated Values (?) not sure what they are calibrated to.
     int32_t raw = adc.readData();
-    float value = (raw - 0) * LOAD_CELL_CAL;
+
+    // format must match calibration.py parser:
+    // "time: <float> raw: <int>\n"
+
+    //float value = (raw - 0) * LOAD_CELL_CAL;
     // Serial.println(value);
     Serial.print("time: "); // printing values to plot on loadcell_liveplot.py
     Serial.print(millis() / 1000.0, 3);
-    Serial.print(" modified_weight: ");
-    Serial.println(value, 6);
+    Serial.print(" raw: ");
+    //Serial.println(value, 6);
 
     //Raw Values
     Serial.println(raw);

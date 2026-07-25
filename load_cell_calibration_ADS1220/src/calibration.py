@@ -108,6 +108,23 @@ def collect_samples(ser, sample_num):
     return mean, std
 
 
+def save_calibration(true_weights, raw_means, raw_stds, scale, offset):
+    "Write all calibration data & fit results to CSV."
+    with open(CALIBRATION_CSV, "w", newline="") as f:
+        writer = csv.writer(f)
+
+        #header + data points
+        writer.writerow(["true_weight_grams", "raw_mean", "raw_std"])
+        for w, m, s in zip(true_weights, raw_means, raw_stds):
+            writer.writerow([w, m, s])
+
+        #give a seperation before storing results
+        writer.writerow([])
+        writer.writerow(["scale", scale])
+        writer.writerow(["offset", offset])
+    print(f"Saved {len(true_weights)} points & fit to {CALIBRATION_CSV}")
+
+
 def main():
 
     ports = serial_ports()
@@ -208,10 +225,26 @@ def main():
                 print("Invalid input.")
                 continue
 
+            #tell user to do calibration and block until ready
             input(f"Place {new_true_weight}g on calibrator, then press Enter.")
             ser.reset_input_buffer()
 
+            #take and store samples
             mean, std = collect_samples(ser, NUM_SAMPLES)
+            true_weights.append(new_true_weight)
+            raw_means.append(mean)
+            raw_stds.append(std)
+
+            #Update CSV after each point
+
+            #temp fit if possible
+            if len(true_weights) >= 2:
+                temp_coefficients = np.polyfit(raw_means, true_weights, 1)
+                save_calibration(true_weights, raw_means, raw_stds, temp_coefficients[0], temp_coefficients[1])
+
+            #save without a fit
+            else:
+
 
 
 

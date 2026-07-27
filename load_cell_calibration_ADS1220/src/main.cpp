@@ -13,45 +13,47 @@ const float LOAD_CELL_CAL = 1.0f;
 void setup() {
     Serial.begin(115200);
     while (!Serial) {}
-    Serial.println("Teensy booted");
+    //Serial.println("Teensy booted");
 
     SPI.begin();
     SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
 
-    Serial.println("Initializing ADS1220...");
+    //Serial.println("Initializing ADS1220...");
 
     adc.begin();
     pinMode(DRDY_PIN, INPUT_PULLDOWN);
     adc.reset();
     delay(100);
 
-    Serial.println("ADS1220 reset done");
+    //Serial.println("ADS1220 reset done");
 
     adc.writeRegister(0x00, 0x2E);
     adc.writeRegister(0x01, 0xD4);
     delay(10);
 
-
+    /*
     Serial.println("Registers written");
     Serial.print("Reg0 readback (should be 2E): 0x");
     Serial.println(adc.readRegister(0x00), HEX);
     Serial.print("Reg1 readback (should be D4): 0x");
     Serial.println(adc.readRegister(0x01), HEX);
+    */
+
 
     // Wait for up to 6 seconds for the serial port to be opened on the PC side.
     // If no PC connects, continue anyway.
-    for (int i = 0; i < 60; ++i) {
-        delay(100);
-    }
+    // for (int i = 0; i < 60; ++i) {
+    //    delay(100);
+    //}
 
     adc.startConversion();
     delay(100);
-    Serial.println("Conversion started, waiting for DRDY...");
+    // Serial.println("Conversion started, waiting for DRDY...");
 
     // Zero the offset with 100 samples --> sets the initial position as zero.
     adc.findADCOffset(2000);
 
-    Serial.println("SETUP COMPLETE");
+    // Serial.println("SETUP COMPLETE");
 }
 
 void loop() {
@@ -59,7 +61,7 @@ void loop() {
     //    Wait for DRDY to go LOW (conversion ready)
     while (digitalRead(DRDY_PIN)) {}
 
-    int32_t raw = adc.readData();
+    int32_t raw = adc.readDataCalibrated(1.0f);
 
     // format must match calibration.py parser:
     // "time: <float> raw: <int>\n"

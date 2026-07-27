@@ -18,6 +18,7 @@ NUM_SAMPLES = 5000        # samples to average per calibration point (5 sec)
 MIN_MESSAGE_BYTES = 16
 BAUD_RATE = 115200
 CALIBRATION_CSV = "calibration.csv"
+GARBAGE_BUFFER = 1000
 #----------------------------------------------------------------------
 
 
@@ -32,6 +33,8 @@ def read_raw_value(ser):
             #Read a line, waits for a \n
             #skip to latest reading in case of buffer build-up
             # block until a complete \n terminated line arrives
+            ser.reset_input_buffer()
+            time.sleep(0.001)
             line = ser.readline().decode("utf-8").strip()
             
             if not line:
@@ -92,13 +95,15 @@ def collect_samples(ser, sample_num, true_weight=None):
     raw_vals = []
     print(f"Collecting {sample_num} samples", end="", flush=True)
 
-    for sample in range(sample_num):
+    for sample in range(sample_num + GARBAGE_BUFFER):
         _, y = read_raw_value(ser)      #ignoring time, for now.
         raw_vals.append(y)
 
         #fun reporting every 10 samples
         if len(raw_vals) % 10 == 0:
             print(".", end="", flush=True)
+
+    raw_vals = raw_vals[GARBAGE_BUFFER:]        #cuts the first few points to ensure clean data
 
     print()     # new line
     mean = np.mean(raw_vals)

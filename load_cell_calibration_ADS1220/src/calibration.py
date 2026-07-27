@@ -86,7 +86,7 @@ def load_existing_calibrations():
     return true_weights, raw_means, raw_stds
 
 # collect a certain number of samples, in accordance with NUM_SAMPLES. Returns a mean and std.
-def collect_samples(ser, sample_num):
+def collect_samples(ser, sample_num, true_weight=None):
     "Collect NUM_SAMPLES readings. Returns (mean, std)."
 
     raw_vals = []
@@ -114,6 +114,8 @@ def collect_samples(ser, sample_num):
     plt.xlabel("Sample #")
     plt.ylabel("Raw ADC")
     plt.title("Collected Samples")
+    title = f"Collected Samples — {true_weight}g" if true_weight is not None else "Collected Samples"
+    plt.title(title)
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -298,7 +300,7 @@ def main():
             ser.reset_input_buffer()
 
             #take and store samples
-            mean, std = collect_samples(ser, NUM_SAMPLES)
+            mean, std = collect_samples(ser, NUM_SAMPLES, true_weight = new_true_weight)
             true_weights.append(new_true_weight)
             raw_means.append(mean)
             raw_stds.append(std)

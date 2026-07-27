@@ -14,7 +14,7 @@ from rendering import PointsInSpace
 
 # Settings
 #----------------------------------------------------------------------
-NUM_SAMPLES = 50        # samples to average per calibration point
+NUM_SAMPLES = 5000        # samples to average per calibration point (5 sec)
 MIN_MESSAGE_BYTES = 16
 BAUD_RATE = 115200
 CALIBRATION_CSV = "calibration.csv"

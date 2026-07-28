@@ -9,6 +9,10 @@
             "path": "shared"
         },
         {
+            "name": "Force Motor Control",
+            "path": "tendon_force_motor_control"
+        },
+        {
             "name": "Load Cell Calibration",
             "path": "load_cell_calibration_ADS1220"
         },

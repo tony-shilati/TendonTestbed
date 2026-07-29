@@ -1,5 +1,5 @@
 """
-Load cEll calibration script.
+Load Cell calibration script.
 Records ADC readings at known weights, fits a linear calibration curve.
 """
 
@@ -10,7 +10,6 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from com_ports import serial_ports
-from rendering import PointsInSpace
 
 # Settings
 #----------------------------------------------------------------------
@@ -30,8 +29,8 @@ def read_raw_value(ser):
     #keep looping until successful or fails
     while True:
         try:
-            #Read a line, waits for a \n
-            #skip to latest reading in case of buffer build-up
+            # Read a line, waits for a \n
+            # skip to latest reading in case of buffer build-up
             # block until a complete \n terminated line arrives
             ser.reset_input_buffer()
             time.sleep(0.001)

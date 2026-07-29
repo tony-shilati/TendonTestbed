@@ -29,6 +29,7 @@ int N_SAMPLES = 0;
 int sample_index = 0;
 
 // Time Control vars
+uint32_t time_zero = 0;
 uint32_t last_loop_us = 0;
 uint32_t now_us = 0;
 uint32_t dt_us = 0;
@@ -223,9 +224,7 @@ void setup() {
   delay(10);
 
   // Initialize Data
-  F_ref_array = {};
   N_SAMPLES = sizeof(F_ref_array) / sizeof(F_ref_array[0]);
-  
 
     /*
     Serial.println("Registers written");
@@ -305,6 +304,7 @@ void loop() {
 
   // do a zero-time dt to start accumulation properly
   if (first_loop){
+    time_zero = millis();   // for tracking the sine wave
     last_loop_us = now_us;
     first_loop = false;
   }
@@ -312,18 +312,16 @@ void loop() {
   dt_us = now_us - last_loop_us;
   dt = dt_us/1e6f;
 
-  // Force Array Looping
-  if (sample_index >= N_SAMPLES){
-    sample_index = 0;
-  }
-
   // Control Calulations
 
   // F_ref/m_v = xddot_ref (must subtract other forces to get true xddot)
   // integral(xddot) = x_dot
   // Feed ODrive: x_ref and xdot (and also a caluculated torque feed forward)
   // x_ref isn't something we care about much -- it's not going to matter much
-  F_ref = F_ref_array[sample_index];
+  
+  // Live Calculate Force
+  F_ref = (100.0f * sin((PI/10) * ((millis()/1000.0f) - (time_zero/1000.0f)))) + 100.0f;
+
   xddot = (F_ref - (b * xdot_ref) - (k * x_ref))/m_v;
   xdot_ref += xddot * dt;
   x_ref += xdot_ref * dt;   // semi implicit euler

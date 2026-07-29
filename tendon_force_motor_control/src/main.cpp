@@ -10,6 +10,37 @@
 #define ENCODER_CS_PIN 10
 #define DRDY_PIN 9
 
+// Global Vars 
+// (parameters and testbed parameters)
+const float m_v = 1378.125f;
+const float b = 36750.0f;
+const float k = 500e3f;
+const float PULLEY_RADIUS = 0.0089f;    // in meters
+const float GEAR_RATIO = 146.0f;    // for assistive torque control
+
+// Control Vars -- Pre-defined to minimize loop time
+float x_ref = 0.0f;
+float xdot_ref = 0.0f;
+float F_ref = 0.0f;
+float xddot = 0.0f;
+
+float F_ref_array[] = {};
+int N_SAMPLES = 0;
+int sample_index = 0;
+
+// Time Control vars
+uint32_t last_loop_us = 0;
+uint32_t now_us = 0;
+uint32_t dt_us = 0;
+float dt = 0;
+bool first_loop = true;
+
+// Motor Control Vars
+float motor_turns = 0;
+float velocity_feedforward = 0;
+float torque_feedforward = 0;
+
+
 //Start ADC
 ADS1220 adc(LOADCELL_CS_PIN, DRDY_PIN);
 
@@ -23,6 +54,8 @@ void onDRDY() {
 // Load Cell calibration factor: (Vref / gain) / (2^23) — tune to your load cell
 const float LOAD_CELL_SCALE  = 0.07007488819976268f;
 const float LOAD_CELL_OFFSET = 49.394776217565585f;
+
+// Control Array (Target Forces)
 
 // Modified Example Code derived from ODrive's Website
 
@@ -130,14 +163,7 @@ void onCanMessage(const CanMsg& msg) {
 
 void setup() {
   Serial.begin(115200);
-
-  // Wait for up to 6 seconds for the serial port to be opened on the PC side.
-  // If no PC connects, continue anyway.
-  //for (int i = 0; i < 60 && !Serial; ++i) {
-  //  delay(100);
-  //}
   delay(200);
-
 
   Serial.println("Starting ODriveCAN...");
 
@@ -172,8 +198,6 @@ void setup() {
   Serial.print("DC current [A]: ");
   Serial.println(vbus.Bus_Current);
 
-  Serial.println("Enabling closed loop control...");
-
   Serial.println("Setting up AS5047P Encoder...");
   pinMode(ENCODER_CS_PIN, OUTPUT);
   digitalWrite(ENCODER_CS_PIN, HIGH);
@@ -193,6 +217,11 @@ void setup() {
   adc.writeRegister(0x01, 0xD4);
   delay(10);
 
+  // Initialize Data
+  F_ref_array = {};
+  N_SAMPLES = sizeof(F_ref_array) / sizeof(F_ref_array[0]);
+  
+
     /*
     Serial.println("Registers written");
     Serial.print("Reg0 readback (should be 2E): 0x");
@@ -207,7 +236,10 @@ void setup() {
     // for (int i = 0; i < 60; ++i) {
     //    delay(100);
     //}
-  
+
+  //ODrive
+  Serial.println("Enabling closed loop control...");
+
   while (odrv0_user_data.last_heartbeat.Axis_State != ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL) {
     odrv0.clearErrors();
     delay(1);
@@ -248,6 +280,8 @@ void setup() {
   //print the centerpoint
   Serial.print("Center position: ");
   Serial.println(center);
+
+  Serial.println("Starting Control Loop...");
 }
 
 void loop() {
@@ -260,17 +294,43 @@ void loop() {
 
   static uint32_t last_print = 0;
 
-  float SINE_PERIOD = 10.0f; // Period of the position command sine wave in seconds
-  float amplitude = 10.0f;
+  // Time control
 
-  float t = 0.001 * millis();
+  now_us = micros();
+
+  // do a zero-time dt to start accumulation properly
+  if (first_loop){
+    last_loop_us = now_us;
+    first_loop = false;
+  }
   
-  float phase = t * (TWO_PI / SINE_PERIOD);
+  dt_us = now_us - last_loop_us;
+  dt = dt_us/1e6f;
 
-  odrv0.setPosition(
-    center + amplitude * sin(phase), // position
-    amplitude * cos(phase) * (TWO_PI / SINE_PERIOD) // velocity feedforward (optional)
-  );
+  // Force Array Looping
+  if (sample_index >= N_SAMPLES){
+    sample_index = 0;
+  }
+
+  // Control Calulations
+
+  // F_ref/m_v = xddot_ref (must subtract other forces to get true xddot)
+  // integral(xddot) = x_dot
+  // Feed ODrive: x_ref and xdot (and also a caluculated torque feed forward)
+  // x_ref isn't something we care about much -- it's not going to matter much
+  F_ref = F_ref_array[sample_index];
+  xddot = (F_ref - (b * xdot_ref) - (k * x_ref))/m_v;
+  xdot_ref += xddot * dt;
+  x_ref += xdot_ref * dt;   // semi implicit euler
+
+
+  // translate into motor controlling parameters
+  motor_turns = (x_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+  velocity_feedforward = (xdot_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+  torque_feedforward = (F_ref * PULLEY_RADIUS) / GEAR_RATIO;
+
+  //Command ODrive to move motor
+  odrv0.setPosition(motor_turns, velocity_feedforward, torque_feedforward);
 
     // Read encoder angle
     uint16_t raw = AS5047P->read_raw();
@@ -283,21 +343,25 @@ void loop() {
     // Read loadcell if ready
     if (adcDataReady) {
       adcDataReady = false;
-      float raw_lc = adc.readDataCalibrated(1.0f);
+      float weight = adc.readDataCalibrated(LOAD_CELL_SCALE) + LOAD_CELL_OFFSET;
       Serial.print("time: ");
       Serial.print(millis() / 1000.0, 3);
-      Serial.print(" raw: ");
-      Serial.println(raw_lc);
+      Serial.print(" weight: ");
+      Serial.println(weight, 4);
     }
 
     // print position every 100(ish) ms
     if (millis() - last_print >= 100) {
       last_print = millis();
-      Serial.print("odrv0-pos:");
-      Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
+      //Serial.print("odrv0-pos:");
+      //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
       Serial.print(",encoder-angle:");
       Serial.println(encoder_angle.get_full_angle());
     }
+
+    // Updates for next loop
+    last_loop_us = millis();
+    sample_index++;
 
   // print position and velocity for Serial Plotter
   /*

@@ -77,7 +77,8 @@ public:
     return ((raw >> 0) << 0) & (max_read_ - 1);
   }
 
-  void zero_position(){
+  uint16_t zero_position(){
+    SPI_.beginTransaction(settings_);
     digitalWriteFast(cs_, LOW);
     SPI_.transfer16(read_cmd_);
     digitalWriteFast(cs_, HIGH);
@@ -85,6 +86,7 @@ public:
     digitalWriteFast(cs_, LOW);
     uint16_t raw = SPI_.transfer16(0x000);
     digitalWriteFast(cs_, HIGH);
+    SPI_.endTransaction();
     return ((raw >> 0) << 0) & (max_read_ - 1);
   }
 

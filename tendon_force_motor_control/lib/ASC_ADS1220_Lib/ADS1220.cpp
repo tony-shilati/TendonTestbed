@@ -17,17 +17,21 @@ void ADS1220::reset() {
 }
 
 void ADS1220::writeRegister(uint8_t address, uint8_t value) {
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
     digitalWrite(_cs_pin, LOW);
     SPI.transfer(WREG | (address << 2));
     SPI.transfer(value);
     digitalWrite(_cs_pin, HIGH);
+    SPI.endTransaction();
 }
 
 uint8_t ADS1220::readRegister(uint8_t address) {
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
     digitalWrite(_cs_pin, LOW);
     SPI.transfer(RREG | (address << 2));
     uint8_t value = SPI.transfer(0x00);
     digitalWrite(_cs_pin, HIGH);
+    SPI.endTransaction();
     return value;
 }
 
@@ -35,12 +39,16 @@ int32_t ADS1220::readData() {
 
     uint8_t b0, b1, b2;
 
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
+
     digitalWrite(_cs_pin, LOW);
     SPI.transfer(RDATA);
     b0 = SPI.transfer(0x00);
     b1 = SPI.transfer(0x00);
     b2 = SPI.transfer(0x00);
     digitalWrite(_cs_pin, HIGH);
+
+    SPI.endTransaction();
 
     int32_t adc = (int32_t)b0 << 16 | (int32_t)b1 << 8 | (int32_t)b2;
 
@@ -81,7 +89,9 @@ void ADS1220::findADCOffset(int32_t num_samples) {
 
 
 void ADS1220::spi_command(uint8_t command) {
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
     digitalWrite(_cs_pin, LOW);
     SPI.transfer(command);
     digitalWrite(_cs_pin, HIGH);
+    SPI.endTransaction();
 }

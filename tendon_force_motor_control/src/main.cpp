@@ -40,6 +40,11 @@ float motor_turns = 0;
 float velocity_feedforward = 0;
 float torque_feedforward = 0;
 
+//Print Vars
+float loadcell_read_time_us = -1.0f;
+float weight = 0.0f;
+
+
 
 //Start ADC
 ADS1220 adc(LOADCELL_CS_PIN, DRDY_PIN);
@@ -343,20 +348,31 @@ void loop() {
     // Read loadcell if ready
     if (adcDataReady) {
       adcDataReady = false;
-      float weight = adc.readDataCalibrated(LOAD_CELL_SCALE) + LOAD_CELL_OFFSET;
-      Serial.print("time: ");
-      Serial.print(millis() / 1000.0, 3);
-      Serial.print(" weight: ");
-      Serial.println(weight, 4);
+      weight = adc.readDataCalibrated(LOAD_CELL_SCALE) + LOAD_CELL_OFFSET;
+      loadcell_read_time_us = millis();
+      //Serial.print("time: ");
+      //Serial.print(millis() / 1000.0, 3);
+      //Serial.print(" weight: ");
+      //Serial.println(weight, 4);
     }
 
-    // print position every 100(ish) ms
+    // print data every 100(ish) ms
     if (millis() - last_print >= 100) {
       last_print = millis();
       //Serial.print("odrv0-pos:");
       //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
-      Serial.print(",encoder-angle:");
+      
+      //encoder prints
+      Serial.print("encoder-time:");
+      Serial.print(millis() / 1000.0, 3);
+      Serial.print("  encoder-angle:");
       Serial.println(encoder_angle.get_full_angle());
+
+      //load cell prints
+      Serial.print("loadcell-time");
+      Serial.print(loadcell_read_time_us / 1000.0, 3);
+      Serial.print("  weight:");
+      Serial.println(weight, 4);
     }
 
     // Updates for next loop

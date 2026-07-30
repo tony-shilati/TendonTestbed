@@ -69,6 +69,8 @@ void onFeedback(Get_Encoder_Estimates_msg_t& msg, void* user_data);
 void onCanMessage(const CanMsg& msg);
 #endif
 
+void onDRDY();
+
 /* -------------------------------------
  * ODRIVE Structures
  * ------------------------------------- */
@@ -125,6 +127,8 @@ float x_ref = 0.0f;
 float xdot_ref = 0.0f;
 float F_ref = 0.0f;
 float xddot = 0.0f;
+float xdot_cmd = 0.0f;
+float x_cmd = 0.0f;
 
 // Time Control vars
 uint32_t time_zero = 0;
@@ -143,44 +147,6 @@ float torque_feedforward = 0;
 float loadcell_read_time_us = -1.0f;
 float weight = 0.0f;
 
-void onDRDY() {
-  adcDataReady = true;
-}
-
-bool setupCan() {
-  can_intf.begin();
-  can_intf.setBaudRate(CAN_BAUDRATE);
-  can_intf.setMaxMB(16);
-  can_intf.enableFIFO();
-  can_intf.enableFIFOInterrupt();
-  can_intf.onReceive(onCanMessage);
-  return true;
-}
-
-// Called every time a Heartbeat message arrives from the ODrive
-void onHeartbeat(Heartbeat_msg_t& msg, void* user_data) {
-  ODriveUserData* odrv_user_data = static_cast<ODriveUserData*>(user_data);
-  odrv_user_data->last_heartbeat = msg;
-  odrv_user_data->received_heartbeat = true;
-}
-
-// Called every time a feedback message arrives from the ODrive
-void onFeedback(Get_Encoder_Estimates_msg_t& msg, void* user_data) {
-  ODriveUserData* odrv_user_data = static_cast<ODriveUserData*>(user_data);
-  odrv_user_data->last_feedback = msg;
-  odrv_user_data->received_feedback = true;
-}
-
-// Called for every message that arrives on the CAN bus
-void onCanMessage(const CanMsg& msg) {
-  //CAN debug messages
-  //Serial.print("CAN msg received, id: 0x");
-  //Serial.println(msg.id, HEX);
-  
-  for (auto odrive: odrives) {
-    onReceive(msg, *odrive);
-  }
-}
 
 
 /* -------------------------------------
@@ -295,6 +261,7 @@ void setup() {
   Serial.println("Entering main loop");
 }
 
+// Loop runs at the maximum load cell's rate. This may be changed later.
 void loop() {
   pumpEvents(can_intf); // This is required on some platforms to handle incoming feedback CAN messages
                         // Note that on MCP2515-based platforms, this will delay for a fixed 10ms.
@@ -305,12 +272,38 @@ void loop() {
 
   static uint32_t last_print = 0;
 
+  if (first_loop){
+    time_zero = micros();   // for tracking the sine wave
+    last_loop_us = now_us;
+    first_loop = false;
+  }
+
   while (digitalRead(DRDY_PIN)) {}    //wait for drdy to trip before proeceding
 
-  // Read loadcell ever loop. we only continue our loop when we have data.
-  adcDataReady = false;
   weight = adc.readDataCalibrated(LOAD_CELL_SCALE) + LOAD_CELL_OFFSET;
-  loadcell_read_time_us = millis();
+  loadcell_read_time_us = micros();
+  now_us = micros();
+  
+  F_ref = (100.0f * sin((PI/10) * ((now_us/1000000.0f) - (time_zero/1000000.0f)))) + 100.0f;
+
+
+  dt_us = now_us - last_loop_us;
+  dt = dt_us/1e6f;
+
+  float delta_F = F_ref - b*xdot_cmd - (weight * 9.81f/1000.0f); 
+  float delta_xddot = delta_F/m_v;
+  float delta_xdot = delta_xddot * dt;
+  x_cmd = delta_xdot * dt + x_cmd;
+  xdot_cmd = delta_xddot * dt + xdot_cmd;
+
+  // translate into motor controlling parameters
+  motor_turns = (x_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+  velocity_feedforward = (xdot_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+
+  //Command ODrive to move motor
+  odrv0.setPosition(-motor_turns, -velocity_feedforward);   // winding backwards
+
+
   //Serial.print("time: ");
   //Serial.print(millis() / 1000.0, 3);
   //Serial.print(" weight: ");
@@ -319,17 +312,12 @@ void loop() {
 
   // Time control
 
-  now_us = micros();
+  
 
   // do a zero-time dt to start accumulation properly
-  if (first_loop){
-    time_zero = millis();   // for tracking the sine wave
-    last_loop_us = now_us;
-    first_loop = false;
-  }
+
   
-  dt_us = now_us - last_loop_us;
-  dt = dt_us/1e6f;
+
 
   // Control Calulations
 
@@ -338,21 +326,6 @@ void loop() {
   // Feed ODrive: x_ref and xdot (and also a caluculated torque feed forward)
   // x_ref isn't something we care about much -- it's not going to matter much
   
-  // Live Calculate Desired Force
-  F_ref = (100.0f * sin((PI/10) * ((millis()/1000.0f) - (time_zero/1000.0f)))) + 100.0f;
-
-  xddot = (F_ref - (b * xdot_ref) - (k * x_ref))/m_v;
-  xdot_ref += xddot * dt;
-  x_ref += xdot_ref * dt;   // semi implicit euler
-
-
-  // translate into motor controlling parameters
-  motor_turns = (x_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
-  velocity_feedforward = (xdot_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
-  torque_feedforward = (F_ref * PULLEY_RADIUS) / GEAR_RATIO;
-
-  //Command ODrive to move motor
-  odrv0.setPosition(0, 0, 0);
 
     // Read encoder angle
     uint16_t raw = AS5047P->read_raw();
@@ -361,9 +334,6 @@ void loop() {
       float radians = (raw / 16383.0f) * TWO_PI;
       encoder_angle.update_angle(radians);
     }
-
-    Serial.print("loop-time (ms): ");
-    Serial.println(dt_us);
 
 
     // print data every 100(ish) ms
@@ -383,11 +353,19 @@ void loop() {
       Serial.print(loadcell_read_time_us / 1000.0, 3);
       Serial.print("  weight:");
       Serial.println(weight, 4);
+
+      Serial.print("f_ref: ");
+      Serial.println(F_ref);
+
+      Serial.print("delta_f: ");
+      Serial.println(delta_F);
+
+      Serial.print("delta_xddot: ");
+      Serial.println(delta_xddot);
     }
 
     // Updates for next loop
     last_loop_us = micros();
-    sample_index++;
 
   // print position and velocity for Serial Plotter
   /*
@@ -401,4 +379,50 @@ void loop() {
     Serial.println(feedback.Vel_Estimate);
   }
     */
+}
+
+
+/* -------------------------------------
+ * ODrive Helper Functions
+ * ------------------------------------- */
+bool setupCan() {
+  can_intf.begin();
+  can_intf.setBaudRate(CAN_BAUDRATE);
+  can_intf.setMaxMB(16);
+  can_intf.enableFIFO();
+  can_intf.enableFIFOInterrupt();
+  can_intf.onReceive(onCanMessage);
+  return true;
+}
+
+// Called every time a Heartbeat message arrives from the ODrive
+void onHeartbeat(Heartbeat_msg_t& msg, void* user_data) {
+  ODriveUserData* odrv_user_data = static_cast<ODriveUserData*>(user_data);
+  odrv_user_data->last_heartbeat = msg;
+  odrv_user_data->received_heartbeat = true;
+}
+
+// Called every time a feedback message arrives from the ODrive
+void onFeedback(Get_Encoder_Estimates_msg_t& msg, void* user_data) {
+  ODriveUserData* odrv_user_data = static_cast<ODriveUserData*>(user_data);
+  odrv_user_data->last_feedback = msg;
+  odrv_user_data->received_feedback = true;
+}
+
+// Called for every message that arrives on the CAN bus
+void onCanMessage(const CanMsg& msg) {
+  //CAN debug messages
+  //Serial.print("CAN msg received, id: 0x");
+  //Serial.println(msg.id, HEX);
+  
+  for (auto odrive: odrives) {
+    onReceive(msg, *odrive);
+  }
+}
+
+/* -------------------------------------
+ * Loadcell Helper Functions
+ * ------------------------------------- */
+void onDRDY() {
+  adcDataReady = true;
 }

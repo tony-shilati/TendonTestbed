@@ -21,8 +21,15 @@
  * Motors On/Off & Nodes
  * ------------------------------------- */
 
-#define MOTORS_ON
+//#define MOTORS_ON
 #define ODRV0_NODE_ID 0
+
+/* -------------------------------------
+ * Control Type
+ * ------------------------------------- */
+
+ #define ADMITTANCE_CONTROL
+ #define PID_CONTROL
 
 /* -------------------------------------
  * Communication Baudrates
@@ -109,8 +116,10 @@ Angle encoder_angle;  // rotations=0, radians=0, direction=1 by default
 ODriveUserData odrv0_user_data;   // Keep some application-specific user data for every ODrive.
 #endif
 
-// Load Cell Related
+// Control Loop Enables
 volatile bool adcDataReady = false;
+volatile bool encoder_ready = false;
+volatile bool control_loop = false;
 
 // Encoder Related
 float center = 0.0f;
@@ -267,24 +276,28 @@ unsigned long last_print = 0;
 // Loop runs at the maximum load cell's rate. This may be changed later.
 void loop() {
 
+  // Establish first loop time
   if (first_loop){
     time_zero = micros();   // for tracking the sine wave
     last_loop_us = now_us;
     first_loop = false;
   }
 
-  while (digitalRead(DRDY_PIN)) {}    //wait for drdy to trip before proeceding
+  // Always grab data if available
+  if (adcDataReady){
+    weight = adc.readDataCalibrated(LOAD_CELL_SCALE);
+    loadcell_read_time_us = micros();
+  }
+
   #ifdef MOTORS_ON
   pumpEvents(can_intf);
   #endif
 
-  weight = adc.readDataCalibrated(LOAD_CELL_SCALE);
-  loadcell_read_time_us = micros();
   now_us = micros();
   
+  #ifdef ADMITTANCE_CONTROL
   //F_ref = (10.0f * sin((PI/10) * ((now_us/1000000.0f) - (time_zero/1000000.0f)))) + 15.0f;
   F_ref = 10.0f;
-
 
   dt_us = now_us - last_loop_us;
   dt = dt_us/1e6f;
@@ -301,54 +314,53 @@ void loop() {
   //Command ODrive to move motor
   odrv0.setPosition(-motor_turns);   // winding backwards
   #endif
-  
 
-    // Read encoder angle
-    uint16_t raw = AS5047P->read_raw();
-
-    if (raw != 0 && raw != 16383) {
-      float radians = (raw / 16383.0f) * TWO_PI;
-      encoder_angle.update_angle(radians);
-    }
-
-
-    // print data every 100(ish) ms
-    if (millis() - last_print >= 100) {
-      last_print = millis();
-      //Serial.print("odrv0-pos:");
-      //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
+  // print data every 10(ish) ms
+  if (millis() - last_print >= 10) {
+    last_print = millis();
+    //Serial.print("odrv0-pos:");
+    //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
       
-      //encoder prints
-      Serial.print("encoder-time:");
-      Serial.print(millis() / 1000.0, 3);
-      Serial.print("  encoder-angle:");
-      Serial.println(encoder_angle.get_full_angle());
+    //encoder prints
+    Serial.print("encoder-time:");
+    Serial.print(millis() / 1000.0, 3);
+    Serial.print("  encoder-angle:");
+    Serial.println(encoder_angle.get_full_angle());
 
-      //load cell prints
-      Serial.print("loadcell-time");
-      Serial.print(loadcell_read_time_us / 1000.0, 3);
-      Serial.print("  weight:");
-      Serial.println(weight, 4);
+    //load cell prints
+    Serial.print("loadcell-time");
+    Serial.print(loadcell_read_time_us / 1000.0, 3);
+    Serial.print("  weight:");
+    Serial.println(weight, 4);
 
-      Serial.print("f_ref: ");
-      Serial.println(F_ref);
+    Serial.print("f_ref: ");
+    Serial.println(F_ref);
 
-      Serial.print("delta_f: ");
-      Serial.println(delta_F);
+    Serial.print("delta_f: ");
+    Serial.println(delta_F);
 
-      Serial.print("xddot: ");
-      Serial.println(xddot);
+    Serial.print("xddot: ");
+    Serial.println(xddot);
 
-      Serial.print("xdot: ");
-      Serial.println(xdot_cmd);
+    Serial.print("xdot: ");
+    Serial.println(xdot_cmd);
 
-      Serial.print("xcmd: ");
-      Serial.println(x_cmd, 5);
-      Serial.println("-----------------------");
-    }
+    Serial.print("xcmd: ");
+    Serial.println(x_cmd, 5);
+    Serial.println("-----------------------");
+  }
+  #endif
 
-    // Updates for next loop
-    last_loop_us = micros();
+  // Read encoder angle
+  uint16_t raw = AS5047P->read_raw();
+
+  if (raw != 0 && raw != 16383) {
+    float radians = (raw / 16383.0f) * TWO_PI;
+    encoder_angle.update_angle(radians);
+  }
+  
+  // Updates for next loop
+  last_loop_us = micros();
 
   // print position and velocity for Serial Plotter
   /*
@@ -405,8 +417,16 @@ void onCanMessage(const CanMsg& msg) {
 #endif
 
 /* -------------------------------------
- * Loadcell Helper Functions
+ * Data Helper Functions
  * ------------------------------------- */
 void onDRDY() {
   adcDataReady = true;
+}
+
+void flip_encoder_ready(){
+  encoder_ready = true;
+}
+
+void flip_control_true(){
+  control_loop = true;
 }

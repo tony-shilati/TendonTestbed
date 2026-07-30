@@ -21,7 +21,7 @@
  * Motors On/Off & Nodes
  * ------------------------------------- */
 
-//#define MOTORS_OFF
+//#define MOTORS_ON
 #define ODRV0_NODE_ID 0
 
 /* -------------------------------------
@@ -116,8 +116,8 @@ volatile bool adcDataReady = false;
 float center = 0.0f;
 
 // Controller Parameters
-const float m_v = 100.0f;
-const float b = 5.0f;   // Formerly 36750.0f
+const float m_v = 2000000.0f;
+const float b = 20000.0f;   // Formerly 36750.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
@@ -127,6 +127,9 @@ float F_ref = 0.0f;
 float xddot = 0.0f;
 float xdot_cmd = 0.0f;
 float x_cmd = 0.0f;
+float delta_F = 0.0f;
+
+
 
 // Time Control vars
 unsigned long time_zero = 0;
@@ -286,7 +289,7 @@ void loop() {
   dt_us = now_us - last_loop_us;
   dt = dt_us/1e6f;
 
-  float delta_F = F_ref - b*xdot_cmd - weight; 
+  delta_F = F_ref - b*xdot_cmd - weight; 
   xddot += delta_F/m_v;
   xdot_cmd += xddot * dt;
   x_cmd += xdot_cmd * dt;
@@ -340,7 +343,7 @@ void loop() {
       Serial.println(xdot_cmd);
 
       Serial.print("xcmd: ");
-      Serial.println(x_cmd);
+      Serial.println(x_cmd, 5);
       Serial.println("-----------------------");
     }
 

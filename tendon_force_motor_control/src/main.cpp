@@ -118,7 +118,7 @@ float center = 0.0f;
 
 // Controller Parameters
 const float m_v = 1378.125f;
-const float b = 36750.0f;
+const float b = 100;   // Formerly 36750.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 

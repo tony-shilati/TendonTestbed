@@ -21,7 +21,7 @@
  * Motors On/Off & Nodes
  * ------------------------------------- */
 
-#define MOTORS_ON
+// #define MOTORS_ON
 #define ODRV0_NODE_ID 0
 
 /* -------------------------------------
@@ -53,8 +53,7 @@
 #define OFFSET_SAMPLES 2000
 
 // Load Cell calibration factor: (Vref / gain) / (2^23) — tune to your load cell (N/tick)
-const float LOAD_CELL_SCALE  = 0.07007488819976268f;
-const float LOAD_CELL_OFFSET = 49.394776217565585f;
+const float LOAD_CELL_SCALE  = 0.0007007488819976268f;
 
 
 /* -------------------------------------
@@ -117,8 +116,8 @@ volatile bool adcDataReady = false;
 float center = 0.0f;
 
 // Controller Parameters
-const float m_v = 1378.125f;
-const float b = 100;   // Formerly 36750.0f
+const float m_v = 1.0f;
+const float b = 5;   // Formerly 36750.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
@@ -131,10 +130,10 @@ float xdot_cmd = 0.0f;
 float x_cmd = 0.0f;
 
 // Time Control vars
-uint32_t time_zero = 0;
-uint32_t last_loop_us = 0;
-uint32_t now_us = 0;
-uint32_t dt_us = 0;
+unsigned long time_zero = 0;
+unsigned long last_loop_us = 0;
+unsigned long now_us = 0;
+unsigned long dt_us = 0;
 float dt = 0;
 bool first_loop = true;
 
@@ -263,14 +262,8 @@ void setup() {
 
 // Loop runs at the maximum load cell's rate. This may be changed later.
 void loop() {
-  pumpEvents(can_intf); // This is required on some platforms to handle incoming feedback CAN messages
-                        // Note that on MCP2515-based platforms, this will delay for a fixed 10ms.
-                        //
-                        // This has been found to reduce the number of dropped messages, however it can be removed
-                        // for applications requiring loop times over 100Hz.
-                        // Enabled because of Teensy + FlexCAN Implementation
 
-  static uint32_t last_print = 0;
+  unsigned long last_print = 0;
 
   if (first_loop){
     time_zero = micros();   // for tracking the sine wave
@@ -279,52 +272,32 @@ void loop() {
   }
 
   while (digitalRead(DRDY_PIN)) {}    //wait for drdy to trip before proeceding
+  #ifdef MOTORS_ON
+  pumpEvents(can_intf);
+  #endif
 
-  weight = adc.readDataCalibrated(LOAD_CELL_SCALE) + LOAD_CELL_OFFSET;
+  weight = adc.readDataCalibrated(LOAD_CELL_SCALE);
   loadcell_read_time_us = micros();
   now_us = micros();
   
-  F_ref = (100.0f * sin((PI/10) * ((now_us/1000000.0f) - (time_zero/1000000.0f)))) + 100.0f;
+  F_ref = (10.0f * sin((PI/10) * ((now_us/1000000.0f) - (time_zero/1000000.0f)))) + 10.0f;
 
 
   dt_us = now_us - last_loop_us;
   dt = dt_us/1e6f;
 
-  float delta_F = F_ref - b*xdot_cmd - (weight * 9.81f/1000.0f); 
-  float delta_xddot = delta_F/m_v;
-  float delta_xdot = delta_xddot * dt;
-  x_cmd = delta_xdot * dt + x_cmd;
-  xdot_cmd = delta_xddot * dt + xdot_cmd;
+  float delta_F = F_ref - b*xdot_cmd - weight; 
+  xddot += delta_F/m_v;
+  xdot_cmd += xddot * dt;
+  x_cmd += xdot_cmd * dt;
 
   // translate into motor controlling parameters
   motor_turns = (x_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
   velocity_feedforward = (xdot_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
-
+  #ifdef MOTORs_ON
   //Command ODrive to move motor
   odrv0.setPosition(-motor_turns, -velocity_feedforward);   // winding backwards
-
-
-  //Serial.print("time: ");
-  //Serial.print(millis() / 1000.0, 3);
-  //Serial.print(" weight: ");
-  //Serial.println(weight, 4);
-  
-
-  // Time control
-
-  
-
-  // do a zero-time dt to start accumulation properly
-
-  
-
-
-  // Control Calulations
-
-  // F_ref/m_v = xddot_ref (must subtract other forces to get true xddot)
-  // integral(xddot) = x_dot
-  // Feed ODrive: x_ref and xdot (and also a caluculated torque feed forward)
-  // x_ref isn't something we care about much -- it's not going to matter much
+  #endif
   
 
     // Read encoder angle
@@ -360,8 +333,15 @@ void loop() {
       Serial.print("delta_f: ");
       Serial.println(delta_F);
 
-      Serial.print("delta_xddot: ");
-      Serial.println(delta_xddot);
+      Serial.print("xddot: ");
+      Serial.println(xddot);
+
+      Serial.print("xdot: ");
+      Serial.println(xdot_cmd);
+
+      Serial.print("xcmd: ");
+      Serial.println(x_cmd);
+      Serial.println("-----------------------");
     }
 
     // Updates for next loop
@@ -381,7 +361,7 @@ void loop() {
     */
 }
 
-
+#ifdef MOTORS_ON
 /* -------------------------------------
  * ODrive Helper Functions
  * ------------------------------------- */
@@ -419,6 +399,7 @@ void onCanMessage(const CanMsg& msg) {
     onReceive(msg, *odrive);
   }
 }
+#endif
 
 /* -------------------------------------
  * Loadcell Helper Functions

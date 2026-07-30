@@ -21,7 +21,7 @@
  * Motors On/Off & Nodes
  * ------------------------------------- */
 
-// #define MOTORS_ON
+//#define MOTORS_OFF
 #define ODRV0_NODE_ID 0
 
 /* -------------------------------------
@@ -116,13 +116,12 @@ volatile bool adcDataReady = false;
 float center = 0.0f;
 
 // Controller Parameters
-const float m_v = 1.0f;
-const float b = 5;   // Formerly 36750.0f
+const float m_v = 100.0f;
+const float b = 5.0f;   // Formerly 36750.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
 // Control Vars -- Pre-defined to minimize loop time
-float x_ref = 0.0f;
 float xdot_ref = 0.0f;
 float F_ref = 0.0f;
 float xddot = 0.0f;
@@ -260,10 +259,10 @@ void setup() {
   Serial.println("Entering main loop");
 }
 
+unsigned long last_print = 0;
+
 // Loop runs at the maximum load cell's rate. This may be changed later.
 void loop() {
-
-  unsigned long last_print = 0;
 
   if (first_loop){
     time_zero = micros();   // for tracking the sine wave
@@ -280,7 +279,8 @@ void loop() {
   loadcell_read_time_us = micros();
   now_us = micros();
   
-  F_ref = (10.0f * sin((PI/10) * ((now_us/1000000.0f) - (time_zero/1000000.0f)))) + 10.0f;
+  //F_ref = (10.0f * sin((PI/10) * ((now_us/1000000.0f) - (time_zero/1000000.0f)))) + 15.0f;
+  F_ref = 10.0f;
 
 
   dt_us = now_us - last_loop_us;
@@ -292,11 +292,11 @@ void loop() {
   x_cmd += xdot_cmd * dt;
 
   // translate into motor controlling parameters
-  motor_turns = (x_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+  motor_turns = (x_cmd / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
   velocity_feedforward = (xdot_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
-  #ifdef MOTORs_ON
+  #ifdef MOTORS_ON
   //Command ODrive to move motor
-  odrv0.setPosition(-motor_turns, -velocity_feedforward);   // winding backwards
+  odrv0.setPosition(-motor_turns);   // winding backwards
   #endif
   
 

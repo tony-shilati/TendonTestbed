@@ -21,14 +21,14 @@
  * Motors On/Off & Nodes
  * ------------------------------------- */
 
-//#define MOTORS_ON
+#define MOTORS_ON
 #define ODRV0_NODE_ID 0
 
 /* -------------------------------------
  * Control Type
  * ------------------------------------- */
 
- #define ADMITTANCE_CONTROL
+ // #define ADMITTANCE_CONTROL
  #define PID_CONTROL
 
 /* -------------------------------------
@@ -60,7 +60,9 @@
 #define OFFSET_SAMPLES 2000
 
 // Load Cell calibration factor: (Vref / gain) / (2^23) — tune to your load cell (N/tick)
-const float LOAD_CELL_SCALE  = 0.0007007488819976268f;
+const float LOAD_CELL_SCALE  = 0.07007488819976268;
+
+
 
 
 /* -------------------------------------
@@ -76,6 +78,8 @@ void onCanMessage(const CanMsg& msg);
 #endif
 
 void onDRDY();
+void flip_control_ready();
+void flip_encoder_ready();
 
 /* -------------------------------------
  * ODRIVE Structures
@@ -138,8 +142,11 @@ const float b = 100000.0f;   // Formerly 36750.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
-const float kp = 0.001f;
-const float kd = 0.001f;
+const float kp = 10.0f;   // N/m stiffness coefficient
+const float kd = 0.0f;
+const float ki = 100.0f;   // N*s/m damping coefficient
+
+float last_motor_turns = 0.0f;
 
 // Control Vars -- Pre-defined to minimize loop time
 float xdot_ref = 0.0f;
@@ -150,6 +157,7 @@ float x_cmd = 0.0f;
 float delta_F = 0.0f;
 float ddelta_F = 0.0f;
 float prev_delta_F = 0.0f;
+float integral_F = 0.0f;
 
 // Time Control vars
 unsigned long time_zero = 0;
@@ -331,7 +339,7 @@ void loop() {
 
     dt = 0.001f;
 
-    delta_F = F_ref - b*xdot_cmd - weight; 
+    delta_F = F_ref - b*xdot_cmd - (weight/1000 * 9.80665f); 
     xddot += delta_F/m_v;
     xdot_cmd += xddot * dt;
     x_cmd += xdot_cmd * dt;
@@ -384,16 +392,62 @@ void loop() {
     * PID Control
     */
     #ifdef PID_CONTROL
-    delta_F = F_ref - weight;
+    delta_F = F_ref - (weight/1000 * 9.80665f);
     ddelta_F = (delta_F - prev_delta_F)/0.001;
+    integral_F += delta_F * 0.001;
 
-    motor_turns = (((1.0f/kp * delta_F) - (kd * ddelta_F)) / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+    x_cmd = ((1.0f/kp * delta_F) - (kd * ddelta_F) + (1.0f/ki * integral_F));
+
+    motor_turns = (x_cmd / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+    float delta_turns = motor_turns - last_motor_turns;
+    delta_turns = constrain(delta_turns, -0.1f, 0.1f);
+    motor_turns = last_motor_turns + delta_turns;
+
+    last_motor_turns = motor_turns;
 
     #ifdef MOTORS_ON
     odrv0.setPosition(-motor_turns);
     #endif
 
     prev_delta_F = delta_F;
+
+    // print data every 10(ish) ms
+    if (millis() - last_print >= 10) {
+      last_print = millis();
+      //Serial.print("odrv0-pos:");
+      //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
+        
+      //encoder prints
+      Serial.print("encoder-time:");
+      Serial.print(millis() / 1000.0, 3);
+      Serial.print("  encoder-angle:");
+      Serial.println(encoder_angle.get_full_angle());
+
+      //load cell prints
+      Serial.print("loadcell-time");
+      Serial.print(loadcell_read_time_us / 1000.0, 3);
+      Serial.print("  weight:");
+      Serial.println(weight, 4);
+
+      Serial.print("f_ref: ");
+      Serial.println(F_ref);
+
+      Serial.print("loadcell force (N): ");
+      Serial.println(weight/1000 * 9.80665f);
+
+      Serial.print("delta_f: ");
+      Serial.println(delta_F);
+
+      Serial.print("ddelta_f: ");
+      Serial.println(ddelta_F);
+
+      Serial.print("motor_turns: ");
+      Serial.println(motor_turns);
+
+      Serial.print("xcmd: ");
+      Serial.println(x_cmd, 5);
+      Serial.println("-----------------------");
+    }
 
     #endif
     

@@ -109,17 +109,25 @@ ADS1220 adc(LOADCELL_CS_PIN, DRDY_PIN);
 SPIEncoder* AS5047P = nullptr;
 Angle encoder_angle;  // rotations=0, radians=0, direction=1 by default
 
+
+/* -------------------------------------
+ * Control Loop Timers & Flags
+ * ------------------------------------- */
+// Flags
+volatile bool adcDataReady = false;
+volatile bool encoder_ready = false;
+volatile bool control_loop = false;
+
+// Timers
+IntervalTimer control_timer, encoder_timer;
+
+
 /* -------------------------------------
  * Global Vars
  * ------------------------------------- */
 #ifdef MOTORS_ON
 ODriveUserData odrv0_user_data;   // Keep some application-specific user data for every ODrive.
 #endif
-
-// Control Loop Enables
-volatile bool adcDataReady = false;
-volatile bool encoder_ready = false;
-volatile bool control_loop = false;
 
 // Encoder Related
 float center = 0.0f;
@@ -130,6 +138,9 @@ const float b = 100000.0f;   // Formerly 36750.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
+const float kp = 0.001f;
+const float kd = 0.001f;
+
 // Control Vars -- Pre-defined to minimize loop time
 float xdot_ref = 0.0f;
 float F_ref = 0.0f;
@@ -137,8 +148,8 @@ float xddot = 0.0f;
 float xdot_cmd = 0.0f;
 float x_cmd = 0.0f;
 float delta_F = 0.0f;
-
-
+float ddelta_F = 0.0f;
+float prev_delta_F = 0.0f;
 
 // Time Control vars
 unsigned long time_zero = 0;
@@ -156,7 +167,6 @@ float torque_feedforward = 0;
 //Print Vars
 float loadcell_read_time_us = -1.0f;
 float weight = 0.0f;
-
 
 
 /* -------------------------------------
@@ -268,6 +278,10 @@ void setup() {
   
   adc.findADCOffset(OFFSET_SAMPLES);
 
+  // Start Timers
+  control_timer.begin(flip_control_ready, 1000);    // ODrive Controls at 1kHz (periods in nanoseconds)
+  encoder_timer.begin(flip_encoder_ready, 1000);    // Encoder reads at 
+
   Serial.println("Entering main loop");
 }
 
@@ -279,7 +293,6 @@ void loop() {
   // Establish first loop time
   if (first_loop){
     time_zero = micros();   // for tracking the sine wave
-    last_loop_us = now_us;
     first_loop = false;
   }
 
@@ -287,6 +300,18 @@ void loop() {
   if (adcDataReady){
     weight = adc.readDataCalibrated(LOAD_CELL_SCALE);
     loadcell_read_time_us = micros();
+    adcDataReady = false;
+  }
+
+  if (encoder_ready){
+    // Read encoder angle
+    uint16_t raw = AS5047P->read_raw();
+
+    if (raw != 0 && raw != 16383) {
+      float radians = (raw / 16383.0f) * TWO_PI;
+      encoder_angle.update_angle(radians);
+    }
+    encoder_ready = false;
   }
 
   #ifdef MOTORS_ON
@@ -294,71 +319,85 @@ void loop() {
   #endif
 
   now_us = micros();
-  
-  #ifdef ADMITTANCE_CONTROL
+
   //F_ref = (10.0f * sin((PI/10) * ((now_us/1000000.0f) - (time_zero/1000000.0f)))) + 15.0f;
   F_ref = 10.0f;
-
-  dt_us = now_us - last_loop_us;
-  dt = dt_us/1e6f;
-
-  delta_F = F_ref - b*xdot_cmd - weight; 
-  xddot += delta_F/m_v;
-  xdot_cmd += xddot * dt;
-  x_cmd += xdot_cmd * dt;
-
-  // translate into motor controlling parameters
-  motor_turns = (x_cmd / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
-  velocity_feedforward = (xdot_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
-  #ifdef MOTORS_ON
-  //Command ODrive to move motor
-  odrv0.setPosition(-motor_turns);   // winding backwards
-  #endif
-
-  // print data every 10(ish) ms
-  if (millis() - last_print >= 10) {
-    last_print = millis();
-    //Serial.print("odrv0-pos:");
-    //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
-      
-    //encoder prints
-    Serial.print("encoder-time:");
-    Serial.print(millis() / 1000.0, 3);
-    Serial.print("  encoder-angle:");
-    Serial.println(encoder_angle.get_full_angle());
-
-    //load cell prints
-    Serial.print("loadcell-time");
-    Serial.print(loadcell_read_time_us / 1000.0, 3);
-    Serial.print("  weight:");
-    Serial.println(weight, 4);
-
-    Serial.print("f_ref: ");
-    Serial.println(F_ref);
-
-    Serial.print("delta_f: ");
-    Serial.println(delta_F);
-
-    Serial.print("xddot: ");
-    Serial.println(xddot);
-
-    Serial.print("xdot: ");
-    Serial.println(xdot_cmd);
-
-    Serial.print("xcmd: ");
-    Serial.println(x_cmd, 5);
-    Serial.println("-----------------------");
-  }
-  #endif
-
-  // Read encoder angle
-  uint16_t raw = AS5047P->read_raw();
-
-  if (raw != 0 && raw != 16383) {
-    float radians = (raw / 16383.0f) * TWO_PI;
-    encoder_angle.update_angle(radians);
-  }
   
+  if (control_loop){
+    /* ---------
+    * Admittance Control
+    */
+    #ifdef ADMITTANCE_CONTROL
+
+    dt = 0.001f;
+
+    delta_F = F_ref - b*xdot_cmd - weight; 
+    xddot += delta_F/m_v;
+    xdot_cmd += xddot * dt;
+    x_cmd += xdot_cmd * dt;
+
+    // translate into motor controlling parameters
+    motor_turns = (x_cmd / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+    // velocity_feedforward = (xdot_ref / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+    #ifdef MOTORS_ON
+    //Command ODrive to move motor
+    odrv0.setPosition(-motor_turns);   // winding backwards
+    #endif
+
+    // print data every 10(ish) ms
+    if (millis() - last_print >= 10) {
+      last_print = millis();
+      //Serial.print("odrv0-pos:");
+      //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
+        
+      //encoder prints
+      Serial.print("encoder-time:");
+      Serial.print(millis() / 1000.0, 3);
+      Serial.print("  encoder-angle:");
+      Serial.println(encoder_angle.get_full_angle());
+
+      //load cell prints
+      Serial.print("loadcell-time");
+      Serial.print(loadcell_read_time_us / 1000.0, 3);
+      Serial.print("  weight:");
+      Serial.println(weight, 4);
+
+      Serial.print("f_ref: ");
+      Serial.println(F_ref);
+
+      Serial.print("delta_f: ");
+      Serial.println(delta_F);
+
+      Serial.print("xddot: ");
+      Serial.println(xddot);
+
+      Serial.print("xdot: ");
+      Serial.println(xdot_cmd);
+
+      Serial.print("xcmd: ");
+      Serial.println(x_cmd, 5);
+      Serial.println("-----------------------");
+    }
+    #endif
+
+    /* ---------
+    * PID Control
+    */
+    #ifdef PID_CONTROL
+    delta_F = F_ref - weight;
+    ddelta_F = (delta_F - prev_delta_F)/0.001;
+
+    #ifdef MOTORS_ON
+    odrv0.setPosition(-1 * ((1.0f/kp * delta_F) - (kd * ddelta_F)));
+    #endif
+
+    prev_delta_F = delta_F;
+
+    #endif
+    
+    control_loop = false;
+  }
+
   // Updates for next loop
   last_loop_us = micros();
 
@@ -427,6 +466,6 @@ void flip_encoder_ready(){
   encoder_ready = true;
 }
 
-void flip_control_true(){
+void flip_control_ready(){
   control_loop = true;
 }

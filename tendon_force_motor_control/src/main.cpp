@@ -387,8 +387,10 @@ void loop() {
     delta_F = F_ref - weight;
     ddelta_F = (delta_F - prev_delta_F)/0.001;
 
+    motor_turns = (((1.0f/kp * delta_F) - (kd * ddelta_F)) / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
+
     #ifdef MOTORS_ON
-    odrv0.setPosition(-1 * ((1.0f/kp * delta_F) - (kd * ddelta_F)));
+    odrv0.setPosition(-motor_turns);
     #endif
 
     prev_delta_F = delta_F;

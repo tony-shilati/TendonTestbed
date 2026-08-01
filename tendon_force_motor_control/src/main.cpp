@@ -62,8 +62,16 @@
 // Load Cell calibration factor: (Vref / gain) / (2^23) — tune to your load cell (N/tick)
 const float LOAD_CELL_SCALE  = 0.07007488819976268;
 
+#define MA_WINDOW_SIZE 50   // Moving average filter
 
+float weight_buffer[MA_WINDOW_SIZE] = {0};
+int weight_buffer_index = 0;
+float weight_sum = 0.0f;
+bool weight_buffer_filled = false;
 
+float weight_filtered = 0.0f;
+
+float updateMovingAverage(float new_sample);
 
 /* -------------------------------------
  * ODRIVE Setup
@@ -142,9 +150,9 @@ const float b = 100000.0f;   // Formerly 36750.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
-const float kp = 10.0f;   // N/m stiffness coefficient
+const float kp = 30000.0f;   // N/m stiffness coefficient
 const float kd = 0.0f;
-const float ki = 100.0f;   // N*s/m damping coefficient
+const float ki = 3800.0f;   // N*s/m damping coefficient
 
 float last_motor_turns = 0.0f;
 
@@ -158,6 +166,7 @@ float delta_F = 0.0f;
 float ddelta_F = 0.0f;
 float prev_delta_F = 0.0f;
 float integral_F = 0.0f;
+float MAX_INTEGRAL = 100;
 
 // Time Control vars
 unsigned long time_zero = 0;
@@ -306,7 +315,8 @@ void loop() {
 
   // Always grab data if available
   if (adcDataReady){
-    weight = adc.readDataCalibrated(LOAD_CELL_SCALE);
+    float raw_weight = adc.readDataCalibrated(LOAD_CELL_SCALE);
+    weight_filtered = updateMovingAverage(raw_weight);
     loadcell_read_time_us = micros();
     adcDataReady = false;
   }
@@ -392,15 +402,19 @@ void loop() {
     * PID Control
     */
     #ifdef PID_CONTROL
-    delta_F = F_ref - (weight/1000 * 9.80665f);
+    delta_F = F_ref - (weight_filtered/1000 * 9.80665f);
     ddelta_F = (delta_F - prev_delta_F)/0.001;
     integral_F += delta_F * 0.001;
+    float unclamped_F = integral_F;
+    integral_F = constrain(integral_F, -MAX_INTEGRAL, MAX_INTEGRAL);
+
 
     x_cmd = ((1.0f/kp * delta_F) - (kd * ddelta_F) + (1.0f/ki * integral_F));
 
     motor_turns = (x_cmd / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
     float delta_turns = motor_turns - last_motor_turns;
-    delta_turns = constrain(delta_turns, -0.1f, 0.1f);
+    float intended_response = motor_turns;
+    // delta_turns = constrain(delta_turns, -0.3f, 0.3f);   //Clamping for maximum motor speed
     motor_turns = last_motor_turns + delta_turns;
 
     last_motor_turns = motor_turns;
@@ -411,29 +425,29 @@ void loop() {
 
     prev_delta_F = delta_F;
 
-    // print data every 10(ish) ms
-    if (millis() - last_print >= 10) {
+    // print data every 1 ms
+    if (millis() - last_print >= 1) {
       last_print = millis();
       //Serial.print("odrv0-pos:");
       //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
         
       //encoder prints
-      Serial.print("encoder-time:");
+      Serial.print("encoder-time: ");
       Serial.print(millis() / 1000.0, 3);
       Serial.print("  encoder-angle:");
       Serial.println(encoder_angle.get_full_angle());
 
       //load cell prints
-      Serial.print("loadcell-time");
+      Serial.print("loadcell-time: ");
       Serial.print(loadcell_read_time_us / 1000.0, 3);
-      Serial.print("  weight:");
-      Serial.println(weight, 4);
+      Serial.print("  weight filtered: ");
+      Serial.println(weight_filtered, 4);
 
       Serial.print("f_ref: ");
       Serial.println(F_ref);
 
-      Serial.print("loadcell force (N): ");
-      Serial.println(weight/1000 * 9.80665f);
+      Serial.print("loadcell force filtered (N): ");
+      Serial.println(weight_filtered/1000 * 9.80665f);
 
       Serial.print("delta_f: ");
       Serial.println(delta_F);
@@ -441,11 +455,21 @@ void loop() {
       Serial.print("ddelta_f: ");
       Serial.println(ddelta_F);
 
-      Serial.print("motor_turns: ");
+      Serial.print("motor_turns (clamped): ");
       Serial.println(motor_turns);
 
-      Serial.print("xcmd: ");
+      Serial.print("xcmd (unclamped): ");
       Serial.println(x_cmd, 5);
+
+      Serial.print("Intended Delta: ");
+      Serial.println(intended_response-last_motor_turns);
+
+      Serial.print("Unclamped Integral Error: ");
+      Serial.println(unclamped_F);
+
+      Serial.print("Clamped Integral Error: ");
+      Serial.println(integral_F);
+
       Serial.println("-----------------------");
     }
 
@@ -524,4 +548,24 @@ void flip_encoder_ready(){
 
 void flip_control_ready(){
   control_loop = true;
+}
+
+float updateMovingAverage(float new_sample) {
+  // Remove the oldest sample from the running sum
+  weight_sum -= weight_buffer[weight_buffer_index];
+
+  // Add the new sample to the buffer and the running sum
+  weight_buffer[weight_buffer_index] = new_sample;
+  weight_sum += new_sample;
+
+  // Advance the circular index
+  weight_buffer_index = (weight_buffer_index + 1) % MA_WINDOW_SIZE;
+
+  if (weight_buffer_index == 0){
+    weight_buffer_filled = true;
+  }
+
+  // Average over the full window once filled, otherwise average over samples seen so far
+  int count = weight_buffer_filled ? MA_WINDOW_SIZE : weight_buffer_index;
+  return weight_sum / count;
 }

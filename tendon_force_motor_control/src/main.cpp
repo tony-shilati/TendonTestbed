@@ -145,8 +145,8 @@ ODriveUserData odrv0_user_data;   // Keep some application-specific user data fo
 float center = 0.0f;
 
 // Controller Parameters
-const float m_v = 1000000.0f;     // Formerly 1000000.0f
-const float b = 0.0f;       // Formerly 36750.0f and 100000.0f
+const float m_v = 5000.0f;     // Formerly 1000000.0f
+const float b = 20000.0f;       // Formerly 36750.0f and 100000.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
@@ -369,15 +369,15 @@ void loop() {
       //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
         
       //encoder prints
-      Serial.print("encoder-time:");
+      Serial.print("encoder-time: ");
       Serial.print(millis() / 1000.0, 3);
       Serial.print("  encoder-angle:");
       Serial.println(encoder_angle.get_full_angle());
 
       //load cell prints
-      Serial.print("loadcell-time");
+      Serial.print("loadcell-time: ");
       Serial.print(loadcell_read_time_us / 1000.0, 3);
-      Serial.print("  Force (N) averaged:");
+      Serial.print("  Force (N) averaged: ");
       Serial.println(weight_filtered/1000 * 9.80665f, 4);
 
       Serial.print("f_ref: ");

@@ -28,8 +28,8 @@
  * Control Type
  * ------------------------------------- */
 
- // #define ADMITTANCE_CONTROL
- #define PID_CONTROL
+ #define ADMITTANCE_CONTROL
+ //#define PID_CONTROL
 
 /* -------------------------------------
  * Communication Baudrates
@@ -145,8 +145,8 @@ ODriveUserData odrv0_user_data;   // Keep some application-specific user data fo
 float center = 0.0f;
 
 // Controller Parameters
-const float m_v = 1000000.0f;
-const float b = 100000.0f;   // Formerly 36750.0f
+const float m_v = 1000000.0f;     // Formerly 1000000.0f
+const float b = 0.0f;       // Formerly 36750.0f and 100000.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
@@ -349,7 +349,7 @@ void loop() {
 
     dt = 0.001f;
 
-    delta_F = F_ref - b*xdot_cmd - (weight/1000 * 9.80665f); 
+    delta_F = F_ref - b*xdot_cmd - (weight_filtered/1000 * 9.80665f); 
     xddot += delta_F/m_v;
     xdot_cmd += xddot * dt;
     x_cmd += xdot_cmd * dt;
@@ -377,8 +377,8 @@ void loop() {
       //load cell prints
       Serial.print("loadcell-time");
       Serial.print(loadcell_read_time_us / 1000.0, 3);
-      Serial.print("  weight:");
-      Serial.println(weight, 4);
+      Serial.print("  Force (N) averaged:");
+      Serial.println(weight_filtered/1000 * 9.80665f, 4);
 
       Serial.print("f_ref: ");
       Serial.println(F_ref);

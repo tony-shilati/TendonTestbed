@@ -1,0 +1,165 @@
+"""
+Controller Response Analysis Script.
+Plots the force response of the tendon testbed system against the intended response.
+Written by Emerson Tiller
+"""
+
+import serial
+import time
+import csv
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from com_ports import serial_ports
+import threading
+
+# Settings
+#----------------------------------------------------------------------
+MIN_MESSAGE_BYTES = 16
+BAUD_RATE = 115200
+DATA_CSV = "data.csv"
+DRAIN_WINDOW = 0.5      #extra seconds to drian after time stop
+#----------------------------------------------------------------------
+
+# Threading stop condition
+stop_event = threading.Event()
+stop_time = None
+time_zero = None
+
+# First, read the ports
+# Then, keep reading the port until user says we're done
+# When user says we're done, plot everything we've recieved vs intended
+# Save data to CSV
+# we can add analysis later
+#
+
+def collect_until_enter(ser, data_times, data_forces, data_intended):
+    "Reads serial in background until stop_event is set."
+    while True:
+        try:
+            t, y, i = read_raw_value(ser)   # ← unpack 3 values now
+            data_times.append(t)
+            data_forces.append(y)
+            data_intended.append(i)
+
+            # if Enter was hit AND the serial timestamp is past stop_time, finish
+            if stop_event.is_set() and (data_times[-1] - data_times[0]) >= stop_time:
+                break
+            
+        except Exception as e:
+            if stop_event.is_set():
+                break
+            continue
+
+def read_raw_value(ser):
+    "Reads and returns one raw ADC value from serial. Blocks until then."
+    # attempt a read
+    # keep looping until successful or fails
+    # serial will be flooded at 1khz, but we accept this in exchange for data accuracy.
+    # collects all data in serial buffer, but may take longer to run.
+    while True:
+        try:
+            # Read a line, waits for a \n
+            # skip to latest reading in case of buffer build-up
+            # block until a complete \n terminated line arrives
+            line = ser.readline().decode("utf-8").strip()
+            
+            if not line:
+                continue  # timeout with no data, try again
+
+            segments = line.split()
+
+            try:
+                # "real time: 1.234  Force (N) Averaged: 9.8765  Intended Force (N): 10.0"
+                t = float(segments[segments.index("time:") + 1])
+                y = float(segments[segments.index("Averaged:") + 1])
+                i = float(segments[segments.index("Intended") + 3])
+                return t, y, i
+
+            except (ValueError, IndexError):
+                continue  # bad parse, try next line
+
+        except Exception as error:
+            print(error)
+            continue
+
+def save_data(data_times, data_forces):
+    "Saves collected run data to CSV."
+    with open(DATA_CSV, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["time_s", "force"])
+        for t, y in zip(data_times, data_forces):
+            writer.writerow([t, y])
+    print(f"Data saved to {DATA_CSV}")
+
+def main():
+    global stop_time
+
+    ports = serial_ports()
+    if not ports:
+        print("No serial ports found.")
+        return
+    
+    print("Available ports:", ports)
+
+    COM_PORT = input("Enter COM Port:").strip()
+
+    #if no com port specified, defaults to the first
+    if not COM_PORT:
+        COM_PORT = ports[0]
+    
+    ser = serial.Serial(
+        port=COM_PORT,
+        baudrate=BAUD_RATE,
+        parity=serial.PARITY_NONE,
+        stopbits=serial.STOPBITS_ONE,
+        bytesize=serial.EIGHTBITS,
+        timeout=0.5,
+        )   
+
+    time.sleep(2)
+    ser.reset_input_buffer()
+    print(f"Connected to: {ser.portstr}\n")
+
+
+    print("*-*-* Simple Controller Analysis Tool *-*-*")
+    print(f"Plots collected data vs. intended response and saves the run to {DATA_CSV}")
+    print("Warning: Clears previous data after each run.")
+
+    # empty data arrays
+    data_times = []
+    data_forces = []
+    data_intended = []
+
+    time_zero = time.time()
+    # start threading to collect data until user defines stop point
+    thread = threading.Thread(target=collect_until_enter, args=(ser, data_times, data_forces, data_intended), daemon=True)
+    thread.start()
+
+    input("Recording... press Enter to stop.")   # blocks main thread until Enter
+    end_time = time.time()
+    stop_time = (end_time - time_zero) + DRAIN_WINDOW
+
+    stop_event.set()   # signals background thread to stop
+    print("Draining remaining serial buffer...")
+
+    thread.join()      # wait for it to finish
+
+    print(f"Collected {len(data_times)} samples.")
+    ser.close()
+
+    save_data(data_times, data_forces)
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(data_times, data_forces, color='red', label="Measured Force")    
+    plt.plot(data_times, data_intended, color='blue', linestyle='--', label="Intended Force")                                           
+    plt.xlabel("Time (s)")
+    plt.ylabel("Force (N)")
+    plt.title("Controller Response vs Intended")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+if __name__ == "__main__":
+    main()

@@ -28,8 +28,8 @@
  * Control Type
  * ------------------------------------- */
 
- #define ADMITTANCE_CONTROL
- //#define PID_CONTROL
+ //#define ADMITTANCE_CONTROL
+ #define PID_CONTROL
 
 /* -------------------------------------
  * Communication Baudrates
@@ -62,7 +62,7 @@
 // Load Cell calibration factor: (Vref / gain) / (2^23) — tune to your load cell (N/tick)
 const float LOAD_CELL_SCALE  = 0.07007488819976268;
 
-#define MA_WINDOW_SIZE 50   // Moving average filter
+#define MA_WINDOW_SIZE 10   // Moving average filter
 
 float weight_buffer[MA_WINDOW_SIZE] = {0};
 int weight_buffer_index = 0;
@@ -150,9 +150,9 @@ const float b = 20000.0f;       // Formerly 36750.0f and 100000.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
-const float kp = 30000.0f;   // N/m stiffness coefficient
+const float kp = 95000.0f;   // N/m stiffness coefficient
 const float kd = 0.0f;
-const float ki = 3800.0f;   // N*s/m damping coefficient
+const float ki = 0.0000125f;   // 3800.0f
 
 float last_motor_turns = 0.0f;
 
@@ -170,6 +170,8 @@ float MAX_INTEGRAL = 100;
 
 // Time Control vars
 unsigned long time_zero = 0;
+unsigned long period_begin = 0;
+bool sine_started = false;
 unsigned long last_loop_us = 0;
 unsigned long now_us = 0;
 unsigned long dt_us = 0;
@@ -338,9 +340,19 @@ void loop() {
 
   now_us = micros();
 
-  //F_ref = (10.0f * sin((PI/10) * ((now_us/1000000.0f) - (time_zero/1000000.0f)))) + 15.0f;
-  F_ref = 10.0f;
-  
+  if ((now_us - time_zero)/1000000.0f >= 5.0f){
+    /*if (!sine_started) {
+      period_begin = now_us;    // record once when sine starts
+      sine_started = true;
+    }
+    float t = (now_us - period_begin) / 1000000.0f;   // seconds since sine started
+    F_ref = (50.0f * sinf((PI / 1.0f) * t)) + 52.0f;
+    */
+    F_ref = 100.0f;
+  } else {
+    F_ref = 2.0f;
+  }
+
   if (control_loop){
     /* ---------
     * Admittance Control
@@ -362,23 +374,31 @@ void loop() {
     odrv0.setPosition(-motor_turns);   // winding backwards
     #endif
 
-    // print data every 10(ish) ms
-    if (millis() - last_print >= 10) {
+    // print data every 1(ish) ms
+    if (millis() - last_print >= 1) {
       last_print = millis();
       //Serial.print("odrv0-pos:");
       //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
         
-      //encoder prints
-      Serial.print("encoder-time: ");
+      //Analysis Prints
+      Serial.print("real time: ");
       Serial.print(millis() / 1000.0, 3);
-      Serial.print("  encoder-angle:");
-      Serial.println(encoder_angle.get_full_angle());
+      Serial.print("  Force (N) Averaged: ");
+      Serial.print(weight_filtered/1000 * 9.80665f, 4);
+      Serial.print("  Intended Force (N): ");
+      Serial.println(F_ref);
+
+
+
+
+      //Serial.print("  encoder-angle:");
+      //Serial.println(encoder_angle.get_full_angle());
 
       //load cell prints
+      /*
       Serial.print("loadcell-time: ");
       Serial.print(loadcell_read_time_us / 1000.0, 3);
-      Serial.print("  Force (N) averaged: ");
-      Serial.println(weight_filtered/1000 * 9.80665f, 4);
+
 
       Serial.print("f_ref: ");
       Serial.println(F_ref);
@@ -395,6 +415,7 @@ void loop() {
       Serial.print("xcmd: ");
       Serial.println(x_cmd, 5);
       Serial.println("-----------------------");
+      */
     }
     #endif
 
@@ -409,7 +430,7 @@ void loop() {
     integral_F = constrain(integral_F, -MAX_INTEGRAL, MAX_INTEGRAL);
 
 
-    x_cmd = ((1.0f/kp * delta_F) - (kd * ddelta_F) + (1.0f/ki * integral_F));
+    x_cmd = ((1.0f/kp * delta_F) + (ki * integral_F));
 
     motor_turns = (x_cmd / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
     float delta_turns = motor_turns - last_motor_turns;
@@ -431,6 +452,15 @@ void loop() {
       //Serial.print("odrv0-pos:");
       //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
         
+
+      Serial.print("real time: ");
+      Serial.print(millis() / 1000.0, 3);
+      Serial.print("  Force (N) Averaged: ");
+      Serial.print(weight_filtered/1000 * 9.80665f, 4);
+      Serial.print("  Intended Force (N): ");
+      Serial.println(F_ref);
+
+      /*
       //encoder prints
       Serial.print("encoder-time: ");
       Serial.print(millis() / 1000.0, 3);
@@ -471,6 +501,7 @@ void loop() {
       Serial.println(integral_F);
 
       Serial.println("-----------------------");
+      */
     }
 
     #endif

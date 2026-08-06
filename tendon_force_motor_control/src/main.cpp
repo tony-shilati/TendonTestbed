@@ -129,6 +129,7 @@ Angle encoder_angle;  // rotations=0, radians=0, direction=1 by default
 volatile bool adcDataReady = false;
 volatile bool encoder_ready = false;
 volatile bool control_loop = false;
+int kill_counter = 0;
 
 // Timers
 IntervalTimer control_timer, encoder_timer;
@@ -197,6 +198,11 @@ void setup() {
   while(!Serial){
     delay(10);
   }
+
+  Serial.println("Press Enter to begin...");
+  while (!Serial.available()) {}   // wait for any input
+  Serial.read();                   // consume the byte
+  Serial.println("Starting...");
 
   /* ---------
    * Configure ODrive
@@ -304,7 +310,6 @@ void setup() {
   Serial.println("Entering main loop");
 }
 
-unsigned long last_print = 0;
 
 // Loop runs at the maximum load cell's rate. This may be changed later.
 void loop() {
@@ -373,51 +378,7 @@ void loop() {
     #ifdef MOTORS_ON
     //Command ODrive to move motor
     odrv0.setPosition(-motor_turns);   // winding backwards
-    #endif
-
-    // print data every 1(ish) ms
-    if (millis() - last_print >= 1) {
-      last_print = millis();
-      //Serial.print("odrv0-pos:");
-      //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
-        
-      //Analysis Prints
-      Serial.print("real time: ");
-      Serial.print(millis() / 1000.0, 3);
-      Serial.print("  Force (N) Averaged: ");
-      Serial.print(weight_filtered/1000 * 9.80665f, 4);
-      Serial.print("  Intended Force (N): ");
-      Serial.println(F_ref);
-
-
-
-
-      //Serial.print("  encoder-angle:");
-      //Serial.println(encoder_angle.get_full_angle());
-
-      //load cell prints
-      /*
-      Serial.print("loadcell-time: ");
-      Serial.print(loadcell_read_time_us / 1000.0, 3);
-
-
-      Serial.print("f_ref: ");
-      Serial.println(F_ref);
-
-      Serial.print("delta_f: ");
-      Serial.println(delta_F);
-
-      Serial.print("xddot: ");
-      Serial.println(xddot);
-
-      Serial.print("xdot: ");
-      Serial.println(xdot_cmd);
-
-      Serial.print("xcmd: ");
-      Serial.println(x_cmd, 5);
-      Serial.println("-----------------------");
-      */
-    }
+    #endif    
     #endif
 
     /* ---------
@@ -447,68 +408,100 @@ void loop() {
 
     prev_delta_F = delta_F;
 
-    // print data every 1 ms
-    if (millis() - last_print >= 1) {
-      last_print = millis();
-      //Serial.print("odrv0-pos:");
-      //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
+    //Serial.print("odrv0-pos:");
+    //Serial.print(odrv0_user_data.last_feedback.Pos_Estimate);
         
+    /*
+    //encoder prints
+    Serial.print("encoder-time: ");
+    Serial.print(millis() / 1000.0, 3);
+    Serial.print("  encoder-angle:");
+    Serial.println(encoder_angle.get_full_angle());
 
-      Serial.print("real time: ");
-      Serial.print(millis() / 1000.0, 3);
-      Serial.print("  Force (N) Averaged: ");
-      Serial.print(weight_filtered/1000 * 9.80665f, 4);
-      Serial.print("  Intended Force (N): ");
-      Serial.println(F_ref);
+    //load cell prints
+    Serial.print("loadcell-time: ");
+    Serial.print(loadcell_read_time_us / 1000.0, 3);
+    Serial.print("  weight filtered: ");
+    Serial.println(weight_filtered, 4);
 
-      /*
-      //encoder prints
-      Serial.print("encoder-time: ");
-      Serial.print(millis() / 1000.0, 3);
-      Serial.print("  encoder-angle:");
-      Serial.println(encoder_angle.get_full_angle());
+    Serial.print("f_ref: ");
+    Serial.println(F_ref);
 
-      //load cell prints
-      Serial.print("loadcell-time: ");
-      Serial.print(loadcell_read_time_us / 1000.0, 3);
-      Serial.print("  weight filtered: ");
-      Serial.println(weight_filtered, 4);
+    Serial.print("loadcell force filtered (N): ");
+    Serial.println(weight_filtered/1000 * 9.80665f);
 
-      Serial.print("f_ref: ");
-      Serial.println(F_ref);
+    Serial.print("delta_f: ");
+    Serial.println(delta_F);
 
-      Serial.print("loadcell force filtered (N): ");
-      Serial.println(weight_filtered/1000 * 9.80665f);
+    Serial.print("ddelta_f: ");
+    Serial.println(ddelta_F);
 
-      Serial.print("delta_f: ");
-      Serial.println(delta_F);
+    Serial.print("motor_turns (clamped): ");
+    Serial.println(motor_turns);
 
-      Serial.print("ddelta_f: ");
-      Serial.println(ddelta_F);
+    Serial.print("xcmd (unclamped): ");
+    Serial.println(x_cmd, 5);
 
-      Serial.print("motor_turns (clamped): ");
-      Serial.println(motor_turns);
+    Serial.print("Intended Delta: ");
+    Serial.println(intended_response-last_motor_turns);
 
-      Serial.print("xcmd (unclamped): ");
-      Serial.println(x_cmd, 5);
+    Serial.print("Unclamped Integral Error: ");
+    Serial.println(unclamped_F);
 
-      Serial.print("Intended Delta: ");
-      Serial.println(intended_response-last_motor_turns);
+    Serial.print("Clamped Integral Error: ");
+    Serial.println(integral_F);
 
-      Serial.print("Unclamped Integral Error: ");
-      Serial.println(unclamped_F);
-
-      Serial.print("Clamped Integral Error: ");
-      Serial.println(integral_F);
-
-      Serial.println("-----------------------");
-      */
-    }
+    Serial.println("-----------------------");
+    */
 
     #endif
-    
+
+
+    //Print on every control loop
+    Serial.print("real time: ");
+    Serial.print(millis() / 1000.0, 3);
+    Serial.print("  Force (N) Averaged: ");
+    Serial.print(weight_filtered/1000 * 9.80665f, 4);
+    Serial.print("  Intended Force (N): ");
+    Serial.print(F_ref);
+    Serial.print("  Broken Tendon: ");
+
+    // Kill Program and Print True if tendon is broken.
+    if (kill_counter >= 1000){   // 2.5N for ~1 second
+      Serial.println("True");
+
+      #ifdef MOTORS_ON
+      odrv0.setState(ODriveAxisState::AXIS_STATE_IDLE);   // release motor
+      #endif
+
+      control_timer.end();    // stop control loop timer
+      encoder_timer.end();    // stop encoder timer
+
+      while(true);            // halt
+    }
+    else{
+      Serial.println("False");    // Otherwise, we just go with false and keep program alive
+    }
+
+    // Increment kill sequence -- current force is less than 2.5. 
+    // It backs off by 0.2 seconds if it reads force over 2.5 N
+    // If the force is less than 2.5 N, then we add to kill count.
+    // If force is below 2.5N for 2.5 sec, then we kill the program.
+    if ((weight_filtered/1000 * 9.80665f) < 2.5){
+      kill_counter += 1;
+    }
+    else{
+      if (kill_counter >= 200){
+        kill_counter = kill_counter - 200;
+      }
+      else{
+        kill_counter = 0;
+      }
+    }
+
     control_loop = false;
   }
+
 
   // Updates for next loop
   last_loop_us = micros();

@@ -26,6 +26,7 @@ DATA_CSV = "data.csv"
 DRAIN_WINDOW = 0.5      #extra seconds to drian after time stop
 BW_LOW  = 20.0          # [N] — 10% of 10 --> 110 step
 BW_HIGH = 100.0         # [N] — 90% of 10 --> 110 step
+NOTIFICATIONS = True
 #----------------------------------------------------------------------
 
 # Threading stop condition
@@ -145,6 +146,11 @@ def notify(title, message, priority=0):
     Send a push notification via Pushover.
     priority: -2 (silent) to 2 (emergency, requires ack)
     """
+
+    # allows for disabling notifications
+    if not NOTIFICATIONS:
+        return
+
     response = requests.post(
         "https://api.pushover.net/1/messages.json",
         data={
@@ -211,7 +217,7 @@ def main():
     thread.start()
 
     def wait_for_enter():
-        input("Recording... press Enter to stop.")
+        input("Recording... press Enter to stop.\n")
         stop_event.set()
 
     input_thread = threading.Thread(target=wait_for_enter, daemon=True)

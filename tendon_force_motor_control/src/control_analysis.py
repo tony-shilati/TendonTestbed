@@ -15,6 +15,9 @@ import threading
 import requests
 from dotenv import load_dotenv
 
+# load environment variables
+load_dotenv()
+
 # Settings
 #----------------------------------------------------------------------
 MIN_MESSAGE_BYTES = 16
@@ -37,8 +40,8 @@ time_zero = None
 # we can add analysis later
 #
 
-def collect_until_enter(ser, data_times, data_forces, data_intended):
-    "Reads serial in background until stop_event is set."
+def collect_until_stop(ser, data_times, data_forces, data_intended):
+    "Reads serial in background until stop_event is set or the tendon breaks. Sends notification upon stop."
     while True:
         try:
             t, y, i, kill = read_raw_value(ser)   # unpack 3 values now
@@ -49,11 +52,19 @@ def collect_until_enter(ser, data_times, data_forces, data_intended):
             # kill the collection if the tendon broke
             if kill == "True":
                 stop_event.set()
+                try:
+                    notify("Tendon Testbed", "Tendon Broken -- Test Completed", 0)
+                except Exception as e:
+                    print(f"Notify failed: {e}")   # ← don't let notify kill the thread
                 break
 
             # if Enter was hit AND the serial timestamp is past stop_time, finish
             # catches everything in the case of serial flooding
             if stop_event.is_set() and (data_times[-1] - data_times[0]) >= stop_time:
+                try:
+                    notify("Tendon Testbed", "Test Manually Completed", 0)
+                except Exception as e:
+                    print(f"Notify failed: {e}")
                 break
             
         except Exception as e:
@@ -148,10 +159,6 @@ def notify(title, message, priority=0):
     return response.json()
 
 def main():
-
-    # load environment variables
-    load_dotenv()
-
     global stop_time
 
     ports = serial_ports()
@@ -200,10 +207,19 @@ def main():
 
     time_zero = time.time()
     # start threading to collect data until user defines stop point
-    thread = threading.Thread(target=collect_until_enter, args=(ser, data_times, data_forces, data_intended), daemon=True)
+    thread = threading.Thread(target=collect_until_stop, args=(ser, data_times, data_forces, data_intended), daemon=True)
     thread.start()
 
-    input("Recording... press Enter to stop.")   # blocks main thread until Enter
+    def wait_for_enter():
+        input("Recording... press Enter to stop.")
+        stop_event.set()
+
+    input_thread = threading.Thread(target=wait_for_enter, daemon=True)
+    input_thread.start()
+
+    # block main until either Enter is hit or tendon breaks
+    stop_event.wait()
+
     end_time = time.time()
     stop_time = (end_time - time_zero) + DRAIN_WINDOW
 
@@ -214,6 +230,11 @@ def main():
 
     print(f"Collected {len(data_times)} samples.")
     ser.close()
+
+    # normalize time to start at 0
+    if data_times:
+        t_start = data_times[0]
+        data_times = [t - t_start for t in data_times]
 
     save_data(data_times, data_forces, data_intended)
 

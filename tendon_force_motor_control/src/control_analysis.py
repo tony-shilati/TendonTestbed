@@ -12,6 +12,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from com_ports import serial_ports
 import threading
+import requests
+from dotenv import load_dotenv
 
 # Settings
 #----------------------------------------------------------------------
@@ -25,7 +27,7 @@ BW_HIGH = 100.0         # [N] — 90% of 10 --> 110 step
 
 # Threading stop condition
 stop_event = threading.Event()
-stop_time = None
+stop_time = float('inf')
 time_zero = None
 
 # First, read the ports
@@ -39,12 +41,18 @@ def collect_until_enter(ser, data_times, data_forces, data_intended):
     "Reads serial in background until stop_event is set."
     while True:
         try:
-            t, y, i = read_raw_value(ser)   # ← unpack 3 values now
+            t, y, i, kill = read_raw_value(ser)   # unpack 3 values now
             data_times.append(t)
             data_forces.append(y)
             data_intended.append(i)
+            
+            # kill the collection if the tendon broke
+            if kill == "True":
+                stop_event.set()
+                break
 
             # if Enter was hit AND the serial timestamp is past stop_time, finish
+            # catches everything in the case of serial flooding
             if stop_event.is_set() and (data_times[-1] - data_times[0]) >= stop_time:
                 break
             
@@ -83,7 +91,7 @@ def read_raw_value(ser):
     "Reads and returns one raw ADC value from serial. Blocks until then."
     # attempt a read
     # keep looping until successful or fails
-    # serial will be flooded at 1khz, but we accept this in exchange for data accuracy.
+    # serial may be flooded at 1khz, but we accept this in exchange for data accuracy.
     # collects all data in serial buffer, but may take longer to run.
     while True:
         try:
@@ -98,11 +106,12 @@ def read_raw_value(ser):
             segments = line.split()
 
             try:
-                # "real time: 1.234  Force (N) Averaged: 9.8765  Intended Force (N): 10.0"
+                # "real time: 1.234  Force (N) Averaged: 9.8765  Intended Force (N): 10.0  Broken Tendon: True/False"
                 t = float(segments[segments.index("time:") + 1])
                 y = float(segments[segments.index("Averaged:") + 1])
                 i = float(segments[segments.index("Intended") + 3])
-                return t, y, i
+                kill = str(segments[segments.index("Tendon:") + 1])
+                return t, y, i, kill
 
             except (ValueError, IndexError):
                 continue  # bad parse, try next line
@@ -111,16 +120,38 @@ def read_raw_value(ser):
             print(error)
             continue
 
-def save_data(data_times, data_forces):
+def save_data(data_times, data_forces, data_intended):
     "Saves collected run data to CSV."
     with open(DATA_CSV, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["time_s", "force"])
-        for t, y in zip(data_times, data_forces):
-            writer.writerow([t, y])
+        writer.writerow(["time_s", "force", "intended_n"])
+        for t, y, i in zip(data_times, data_forces, data_intended):
+            writer.writerow([t, y, i])
     print(f"Data saved to {DATA_CSV}")
 
+def notify(title, message, priority=0):
+    """
+    Send a push notification via Pushover.
+    priority: -2 (silent) to 2 (emergency, requires ack)
+    """
+    response = requests.post(
+        "https://api.pushover.net/1/messages.json",
+        data={
+            "token": os.environ["PUSHOVER_TOKEN"],
+            "user": os.environ["PUSHOVER_USER"],
+            "title": title,
+            "message": message,
+            "priority": priority,
+        }
+    )
+    response.raise_for_status()  # raises an error if something went wrong
+    return response.json()
+
 def main():
+
+    # load environment variables
+    load_dotenv()
+
     global stop_time
 
     ports = serial_ports()
@@ -159,6 +190,8 @@ def main():
     mode = input("Select mode (1/2): ").strip()
     calc_bw = (mode == "2")
 
+    # teensy waits for an enter to start up.
+    ser.write(b"\n")
 
     # empty data arrays
     data_times = []
@@ -182,7 +215,7 @@ def main():
     print(f"Collected {len(data_times)} samples.")
     ser.close()
 
-    save_data(data_times, data_forces)
+    save_data(data_times, data_forces, data_intended)
 
     if calc_bw:
         calc_bandwidth(data_times, data_forces)

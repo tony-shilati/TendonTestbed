@@ -19,6 +19,8 @@ MIN_MESSAGE_BYTES = 16
 BAUD_RATE = 115200
 DATA_CSV = "data.csv"
 DRAIN_WINDOW = 0.5      #extra seconds to drian after time stop
+BW_LOW  = 20.0          # [N] — 10% of 10 --> 110 step
+BW_HIGH = 100.0         # [N] — 90% of 10 --> 110 step
 #----------------------------------------------------------------------
 
 # Threading stop condition
@@ -50,6 +52,32 @@ def collect_until_enter(ser, data_times, data_forces, data_intended):
             if stop_event.is_set():
                 break
             continue
+
+def calc_bandwidth(data_times, data_forces):
+    "Calculates bandwidth from a 10 --> 110N step. Bw = 0.35/tr"
+
+    # find first time force crosses BW_LOW (20N) on the way up
+    t_low = None
+    t_high = None
+
+    for t, f in zip(data_times, data_forces):
+        if t_low is None and f >= BW_LOW:
+            t_low = t
+        if t_high is None and f >= BW_HIGH:
+            t_high = t
+            break
+
+    if t_low is None or t_high is None:
+        print("Could not find 20N or 100N crossing — check data.")
+        return
+
+    tr = t_high - t_low
+    bw = 0.35 / tr
+
+    print(f"t_20N  = {t_low:.4f}s")
+    print(f"t_100N = {t_high:.4f}s")
+    print(f"Rise time tr = {tr*1000:.2f}ms")
+    print(f"Bandwidth Bw = {bw:.2f} Hz")
 
 def read_raw_value(ser):
     "Reads and returns one raw ADC value from serial. Blocks until then."
@@ -125,6 +153,12 @@ def main():
     print("*-*-* Simple Controller Analysis Tool *-*-*")
     print(f"Plots collected data vs. intended response and saves the run to {DATA_CSV}")
     print("Warning: Clears previous data after each run.")
+    print("\nOptions:")
+    print("1. Record and plot")
+    print("2. Record, plot, and calculate bandwidth (assumes 10 -> 110N step)")
+    mode = input("Select mode (1/2): ").strip()
+    calc_bw = (mode == "2")
+
 
     # empty data arrays
     data_times = []
@@ -150,9 +184,17 @@ def main():
 
     save_data(data_times, data_forces)
 
+    if calc_bw:
+        calc_bandwidth(data_times, data_forces)
+
     plt.figure(figsize=(10, 4))
     plt.plot(data_times, data_forces, color='red', label="Measured Force")    
-    plt.plot(data_times, data_intended, color='blue', linestyle='--', label="Intended Force")                                           
+    plt.plot(data_times, data_intended, color='blue', linestyle='--', label="Intended Force")
+
+    if calc_bw:
+        plt.axhline(y=BW_LOW,  color='gray', linestyle=':', linewidth=1, label=f"{BW_LOW}N (10%)")
+        plt.axhline(y=BW_HIGH, color='gray', linestyle=':', linewidth=1, label=f"{BW_HIGH}N (90%)")
+
     plt.xlabel("Time (s)")
     plt.ylabel("Force (N)")
     plt.title("Controller Response vs Intended")

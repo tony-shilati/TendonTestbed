@@ -62,7 +62,7 @@
 // Load Cell calibration factor: (Vref / gain) / (2^23) — tune to your load cell (N/tick)
 const float LOAD_CELL_SCALE  = 0.07007488819976268;
 
-#define MA_WINDOW_SIZE 10   // Moving average filter
+#define MA_WINDOW_SIZE 6   // Moving average filter
 
 float weight_buffer[MA_WINDOW_SIZE] = {0};
 int weight_buffer_index = 0;
@@ -150,9 +150,9 @@ const float b = 20000.0f;       // Formerly 36750.0f and 100000.0f
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
 
-const float kp = 95000.0f;   // N/m stiffness coefficient
-const float kd = 0.0f;
-const float ki = 0.0000125f;   // 3800.0f
+const float kp = 56000.0f;   // N/m stiffness coefficient (thinner -- 33000)
+const float kd = 0.0000f;
+const float ki = 0.0003f;   // 3800.0f  -- 0.0000125f --> (thinner -- 0.0005f)
 
 float last_motor_turns = 0.0f;
 
@@ -166,7 +166,7 @@ float delta_F = 0.0f;
 float ddelta_F = 0.0f;
 float prev_delta_F = 0.0f;
 float integral_F = 0.0f;
-float MAX_INTEGRAL = 100;
+float MAX_INTEGRAL = 200;
 
 // Time Control vars
 unsigned long time_zero = 0;
@@ -341,16 +341,17 @@ void loop() {
   now_us = micros();
 
   if ((now_us - time_zero)/1000000.0f >= 5.0f){
-    /*if (!sine_started) {
+    
+    if (!sine_started) {
       period_begin = now_us;    // record once when sine starts
       sine_started = true;
     }
     float t = (now_us - period_begin) / 1000000.0f;   // seconds since sine started
-    F_ref = (50.0f * sinf((PI / 1.0f) * t)) + 52.0f;
-    */
-    F_ref = 100.0f;
+    F_ref = (50.0f * sinf((PI / 0.1f) * t)) + 60.0f;
+    
+    //F_ref = 110.0f;
   } else {
-    F_ref = 2.0f;
+    F_ref = 60.0f;
   }
 
   if (control_loop){
@@ -430,7 +431,7 @@ void loop() {
     integral_F = constrain(integral_F, -MAX_INTEGRAL, MAX_INTEGRAL);
 
 
-    x_cmd = ((1.0f/kp * delta_F) + (ki * integral_F));
+    x_cmd = ((1.0f/kp * delta_F) - (kd * ddelta_F) + (ki * integral_F));
 
     motor_turns = (x_cmd / PULLEY_RADIUS) * GEAR_RATIO / TWO_PI;
     float delta_turns = motor_turns - last_motor_turns;

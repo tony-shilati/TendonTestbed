@@ -145,7 +145,7 @@ IntervalTimer control_timer, encoder_timer;
 // define control mode
 int test_mode = 0;
 
-#define MAX_TEST_ARRAY_LEN 2000
+#define MAX_TEST_ARRAY_LEN 25000
 float test_array[MAX_TEST_ARRAY_LEN];
 uint16_t test_array_len = 0;
 uint16_t test_array_index = 0;
@@ -222,16 +222,18 @@ void setup() {
     delay(10);
   }
 
-  Serial.println("Press Enter to begin...");
+  Serial.println("Give mode input to begin...");
   while (!Serial.available()) {}   // wait for any input
 
   String cmd = Serial.readStringUntil('\n');
   cmd.trim();
   test_mode = cmd.toInt();
 
+  Serial.print("Mode selected: ");
+  Serial.println(test_mode);
+  Serial.println("Starting...");
 
-  bool stop_stream = false;
-  // if we need to stream data
+  // if we need to download data
   if ((test_mode == 2) || (test_mode == 3)) {
     Serial.println("Waiting for test array...");
 
@@ -258,9 +260,6 @@ void setup() {
     Serial.println(" values");
 }
 
-  Serial.print("Mode selected: ");
-  Serial.println(test_mode);
-  Serial.println("Starting...");
   /* ---------
    * Configure ODrive
    */

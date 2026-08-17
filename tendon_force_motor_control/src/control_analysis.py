@@ -193,18 +193,40 @@ def main():
     ser.reset_input_buffer()
     print(f"Connected to: {ser.portstr}\n")
 
-
     print("*-*-* Simple Controller Analysis Tool *-*-*")
     print(f"Plots collected data vs. intended response and saves the run to {DATA_CSV}")
     print("Warning: Clears previous data after each run.")
-    print("\nOptions:")
-    print("1. Record and plot")
-    print("2. Record, plot, and calculate bandwidth (assumes 10 -> 110N step)")
-    mode = input("Select mode (1/2): ").strip()
-    calc_bw = (mode == "2")
 
-    # teensy waits for an enter to start up.
-    ser.write(b"\n")
+    while(True):
+        print("\nOptions:")
+        print("1. Waveform Long-Term Durability Test")              # take input waveform and loop it over and over with selected delay
+        print("2. Ultimate Strength Test with Blind Ramping")       # generates a ramp over a selected period of time, between two forces. 
+                                                                    # also sends a waveform but this waveform doesn't repeat
+        print(f"3. Record, plot, and calculate bandwidth (performs hardcoded {} -> {}N step)")      # also generates a waveform to send (a step waveform), again not repeated
+        print("4. Exit")                                            # quit python program
+        mode = input("Make selection (1/2/3/4): ").strip()
+        
+        # teensy waits for an enter to start up.
+        if mode == "1":
+            ser.write(b"1\n")
+            break
+
+        elif mode == "2":
+            ser.write(b"2\n")
+            calc_bw = (mode == "2")
+            break
+
+        elif mode == "3":
+            ser.write(b"3\n")
+            break
+
+        elif mode == "4":
+            break
+
+        else:
+            print("Invalid Selection. Try again.")
+
+    time.sleep(1)   # wait for teensy to setup its chips, failsafe.
 
     # empty data arrays
     data_times = []

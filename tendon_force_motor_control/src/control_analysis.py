@@ -5,6 +5,7 @@ Written by Emerson Tiller
 """
 
 import serial
+import struct
 import time
 import csv
 import os
@@ -23,6 +24,7 @@ load_dotenv()
 MIN_MESSAGE_BYTES = 16
 BAUD_RATE = 115200
 DATA_CSV = "data.csv"
+TEST_SEQ_CSV = "test_seq.csv"
 DRAIN_WINDOW = 0.5      # extra seconds to drian after time stop
 
 RAMP_UP_TIME = 3.0      # [s] - the teensy will hold tension at the first value 
@@ -42,18 +44,12 @@ stop_event = threading.Event()
 stop_time = float('inf')
 time_zero = None
 
-# First, read the ports
-# Then, keep reading the port until user says we're done
-# When user says we're done, plot everything we've recieved vs intended
-# Save data to CSV
-# we can add analysis later
-#
 
 def collect_until_stop(ser, data_times, data_forces, data_intended):
     "Reads serial in background until stop_event is set or the tendon breaks. Sends notification upon stop."
     while True:
         try:
-            t, y, i, kill = read_raw_value(ser)   # unpack 3 values now
+            t, y, i, kill = read_raw_value(ser)   # unpack 4 vals
             data_times.append(t)
             data_forces.append(y)
             data_intended.append(i)
@@ -64,7 +60,7 @@ def collect_until_stop(ser, data_times, data_forces, data_intended):
                 try:
                     notify("Tendon Testbed", "Tendon Broken -- Test Completed", 0)
                 except Exception as e:
-                    print(f"Notify failed: {e}")   # ← don't let notify kill the thread
+                    print(f"Notify failed: {e}")   # don't let notify kill the thread
                 break
 
             # if Enter was hit AND the serial timestamp is past stop_time, finish
@@ -150,10 +146,7 @@ def save_data(data_times, data_forces, data_intended):
     print(f"Data saved to {DATA_CSV}")
 
 def notify(title, message, priority=0):
-    """
-    Send a push notification via Pushover.
-    priority: -2 (silent) to 2 (emergency, requires ack)
-    """
+    "Send a push notification via Pushover. Priority: -2 (silent) to 2 (emergency, requires ack)"
 
     # allows for disabling notifications
     if not NOTIFICATIONS:
@@ -226,6 +219,13 @@ def main():
 
             # make waveform and send it
 
+
+            # Pack as bytes: e.g. each value as a 2-byte unsigned int
+            payload = struct.pack(f'<{len(data)}H', *data)
+
+            # Send a length header first, then the payload
+            ser.write(struct.pack('<H', len(data)))  # how many elements
+            ser.write(payload)                        # the actual data
 
             break
 

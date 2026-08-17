@@ -23,9 +23,17 @@ load_dotenv()
 MIN_MESSAGE_BYTES = 16
 BAUD_RATE = 115200
 DATA_CSV = "data.csv"
-DRAIN_WINDOW = 0.5      #extra seconds to drian after time stop
-BW_LOW  = 20.0          # [N] — 10% of 10 --> 110 step
-BW_HIGH = 100.0         # [N] — 90% of 10 --> 110 step
+DRAIN_WINDOW = 0.5      # extra seconds to drian after time stop
+
+RAMP_UP_TIME = 3.0      # [s] - the teensy will hold tension at the first value 
+                        # of the control waveform for this amount of time. It does
+                        # this to let the controller establish a baseline.
+
+BW_LOW_STEP = 10.0      # [N] - this is where we rest before stepping up
+BW_HIGH_STEP = 110.0    # [N] - end of the step
+
+BW_LOW  = ((BW_HIGH_STEP - BW_LOW_STEP) * 0.1) + BW_LOW_STEP        # [N] — 10% of the step
+BW_HIGH  = ((BW_HIGH_STEP - BW_LOW_STEP) * 0.9) + BW_LOW_STEP       # [N] — 90% of the step
 NOTIFICATIONS = True
 #----------------------------------------------------------------------
 
@@ -202,13 +210,23 @@ def main():
         print("1. Waveform Long-Term Durability Test")              # take input waveform and loop it over and over with selected delay
         print("2. Ultimate Strength Test with Blind Ramping")       # generates a ramp over a selected period of time, between two forces. 
                                                                     # also sends a waveform but this waveform doesn't repeat
-        print(f"3. Record, plot, and calculate bandwidth (performs hardcoded {} -> {}N step)")      # also generates a waveform to send (a step waveform), again not repeated
+        print(f"3. Record, plot, and calculate bandwidth (performs hardcoded {10} -> {110}N step)")      #doesnt generate waveform, just does a hardcoded step
         print("4. Exit")                                            # quit python program
         mode = input("Make selection (1/2/3/4): ").strip()
         
         # teensy waits for an enter to start up.
         if mode == "1":
             ser.write(b"1\n")
+
+            # send initial rest time
+            ser.write(b f"{RAMP_UP_TIME}")
+
+            # send delay between repitions of waveform
+
+
+            # make waveform and send it
+
+
             break
 
         elif mode == "2":

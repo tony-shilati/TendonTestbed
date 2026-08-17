@@ -29,7 +29,7 @@
  * ------------------------------------- */
 
  //#define ADMITTANCE_CONTROL
- #define PID_CONTROL
+ #define PI_CONTROL
 
 /* -------------------------------------
  * Communication Baudrates
@@ -63,6 +63,10 @@
 const float LOAD_CELL_SCALE  = 0.07007488819976268;
 
 #define MA_WINDOW_SIZE 6   // Moving average filter
+
+/* -------------------------------------
+ * Moving Average Variables
+ * ------------------------------------- */
 
 float weight_buffer[MA_WINDOW_SIZE] = {0};
 int weight_buffer_index = 0;
@@ -134,26 +138,45 @@ int kill_counter = 0;
 // Timers
 IntervalTimer control_timer, encoder_timer;
 
+/* -------------------------------------
+ * Test Modes & Waveform Array
+ * ------------------------------------- */
+
+// define control mode
+int test_mode = 0;
+
+#define MAX_TEST_ARRAY_LEN 2000
+float test_array[MAX_TEST_ARRAY_LEN];
+uint16_t test_array_len = 0;
+uint16_t test_array_index = 0;
 
 /* -------------------------------------
  * Global Vars
  * ------------------------------------- */
-#ifdef MOTORS_ON
+
+ #ifdef MOTORS_ON
 ODriveUserData odrv0_user_data;   // Keep some application-specific user data for every ODrive.
 #endif
 
 // Encoder Related
 float center = 0.0f;
 
+/* -------------------------------------
+ * Controller Parameters
+ * ------------------------------------- */
 // Controller Parameters
+#ifdef ADMITTANCE_CONTROL
 const float m_v = 5000.0f;     // Formerly 1000000.0f
 const float b = 20000.0f;       // Formerly 36750.0f and 100000.0f
+#endif
+
+#ifdef PI_CONTROL
+const float kp = 56000.0f;   // N/m stiffness coefficient (thinner -- 33000)
+const float ki = 0.0003f;   // 3800.0f  -- 0.0000125f --> (thinner -- 0.0005f)
+#endif
+
 const float PULLEY_RADIUS = 0.0089f;    // in meters
 const float GEAR_RATIO = 146.0f;
-
-const float kp = 56000.0f;   // N/m stiffness coefficient (thinner -- 33000)
-const float kd = 0.0000f;
-const float ki = 0.0003f;   // 3800.0f  -- 0.0000125f --> (thinner -- 0.0005f)
 
 float last_motor_turns = 0.0f;
 
@@ -179,7 +202,7 @@ unsigned long dt_us = 0;
 float dt = 0;
 bool first_loop = true;
 
-// Motor Control Vars
+// Motor Command Vars
 float motor_turns = 0;
 float velocity_feedforward = 0;
 float torque_feedforward = 0;
@@ -201,9 +224,43 @@ void setup() {
 
   Serial.println("Press Enter to begin...");
   while (!Serial.available()) {}   // wait for any input
-  Serial.read();                   // consume the byte
-  Serial.println("Starting...");
 
+  String cmd = Serial.readStringUntil('\n');
+  cmd.trim();
+  test_mode = cmd.toInt();
+
+
+  bool stop_stream = false;
+  // if we need to stream data
+  if ((test_mode == 2) || (test_mode == 3)) {
+    Serial.println("Waiting for test array...");
+
+    // Wait for the 2-byte length header
+    while (Serial.available() < 2) { }
+    uint16_t count;
+    Serial.readBytes((char*)&count, 2);
+
+    if (count > MAX_TEST_ARRAY_LEN) {
+        Serial.println("Array too large, aborting");
+        while (true); // halt
+    }
+
+    for (uint16_t i = 0; i < count; i++) {
+        while (Serial.available() < 2) { }
+        uint16_t value;
+        Serial.readBytes((char*)&value, 2);
+        test_array[i] = (float)value;
+    }
+
+    test_array_len = count;
+    Serial.print("Received ");
+    Serial.print(test_array_len);
+    Serial.println(" values");
+}
+
+  Serial.print("Mode selected: ");
+  Serial.println(test_mode);
+  Serial.println("Starting...");
   /* ---------
    * Configure ODrive
    */
@@ -311,7 +368,7 @@ void setup() {
 }
 
 
-// Loop runs at the maximum load cell's rate. This may be changed later.
+// Loop runs at teensy's max speed.
 void loop() {
 
   // Establish first loop time
@@ -345,21 +402,34 @@ void loop() {
 
   now_us = micros();
 
-  if ((now_us - time_zero)/1000000.0f >= 5.0f){
+  //
+
+  // If it's a bandwidth test, then we just do a hardcoded step
+  if (test_mode == 3){
     
-    if (!sine_started) {
-      period_begin = now_us;    // record once when sine starts
-      sine_started = true;
+    
+    if ((now_us - time_zero)/1000000.0f >= 5.0f){
+      
+      /*
+      if (!sine_started) {
+        period_begin = now_us;    // record once when sine starts
+        sine_started = true;
+      }
+      float t = (now_us - period_begin) / 1000000.0f;   // seconds since sine started
+      F_ref = (50.0f * sinf((PI / 0.1f) * t)) + 60.0f;
+      */
+      
+      F_ref = 110.0f;
+    } else {
+      F_ref = 60.0f;
     }
-    float t = (now_us - period_begin) / 1000000.0f;   // seconds since sine started
-    F_ref = (50.0f * sinf((PI / 0.1f) * t)) + 60.0f;
-    
-    //F_ref = 110.0f;
-  } else {
-    F_ref = 60.0f;
   }
 
   if (control_loop){
+
+    // Query the test_array for F_ref
+    F_ref = test_array[test_array_index]
+
     /* ---------
     * Admittance Control
     */
@@ -384,7 +454,7 @@ void loop() {
     /* ---------
     * PID Control
     */
-    #ifdef PID_CONTROL
+    #ifdef PI_CONTROL
     delta_F = F_ref - (weight_filtered/1000 * 9.80665f);
     ddelta_F = (delta_F - prev_delta_F)/0.001;
     integral_F += delta_F * 0.001;
@@ -456,7 +526,9 @@ void loop() {
 
     #endif
 
-
+    /* ---------
+    * Data Report Prints
+    */
     //Print on every control loop
     Serial.print("real time: ");
     Serial.print(millis() / 1000.0, 3);
@@ -466,6 +538,9 @@ void loop() {
     Serial.print(F_ref);
     Serial.print("  Broken Tendon: ");
 
+    /* ---------
+    * Program Kill Counter (Tendon Snap Detection)
+    */
     // Kill Program and Print True if tendon is broken.
     if (kill_counter >= 1000){   // 2.5N for ~1 second
       Serial.println("True");
@@ -486,7 +561,7 @@ void loop() {
     // Increment kill sequence -- current force is less than 2.5. 
     // It backs off by 0.2 seconds if it reads force over 2.5 N
     // If the force is less than 2.5 N, then we add to kill count.
-    // If force is below 2.5N for 2.5 sec, then we kill the program.
+    // If force is below 2.5N for 1 sec, then we kill the program.
     if ((weight_filtered/1000 * 9.80665f) < 2.5){
       kill_counter += 1;
     }
@@ -499,8 +574,30 @@ void loop() {
       }
     }
 
+
+    /* ---------
+    * Testing Array Increment
+    */
+
+    // increment through the testing array
+    test_array_index = test_array_index + 1;
+
+    // do we need to reset the test_array loop?
+    // yes, but we do not repeat the waveform
+    if ((test_array_index >= test_array_len) && repeat_waveform == false){
+      test_array_index = test_array_len - 1;    // hold at the final value
+    }
+    // reset test_array and waveform repeats
+    else if ((test_array_index >= test_array_len) && repeat_waveform == true){
+      test_array_index = 0;
+    }
+
+    // reset the control loop state
     control_loop = false;
   }
+
+
+
 
 
   // Updates for next loop

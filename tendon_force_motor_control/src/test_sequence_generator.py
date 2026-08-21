@@ -15,7 +15,7 @@ MIN_FORCE = 2.5         # [N], usually determined by setting of kill timer in ma
 MAX_FORCE = 2000        # [N]
 MIN_AMPLITUDE = 1       # [N]
 MIN_PERIOD = 0.2        # [s]
-MAX_TIME = 25           # [s], maximum total waveform duration
+MAX_TIME = 25           # [s], maximum total waveform duration. Currently takes ~19% of Teensy RAM.
 #----------------------------------------------------------------------
 
 test_sequence_array = []

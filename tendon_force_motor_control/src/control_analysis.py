@@ -22,7 +22,7 @@ load_dotenv()
 # Settings
 #----------------------------------------------------------------------
 MIN_MESSAGE_BYTES = 16
-BAUD_RATE = 115200
+BAUD_RATE = 921600
 DATA_CSV = "data.csv"
 TEST_SEQ_CSV = "test_seq.csv"
 DRAIN_WINDOW = 0.5      # extra seconds to drian after time stop
@@ -165,6 +165,39 @@ def notify(title, message, priority=0):
     response.raise_for_status()  # raises an error if something went wrong
     return response.json()
 
+def plot_saved_run():
+    "Plots the previously saved data.csv run."
+    
+    try:
+        saved_times = []
+        saved_forces = []
+        saved_intended = []
+
+        with open(DATA_CSV, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                saved_times.append(float(row["time_s"]))
+                saved_forces.append(float(row["force"]))
+                saved_intended.append(float(row["intended_n"]))
+
+        if not saved_times:
+            print("CSV is empty.")
+            return
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(saved_times, saved_forces,   color='red',  label="Measured Force")
+        plt.plot(saved_times, saved_intended, color='blue', linestyle='--', label="Intended Force")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Force (N)")
+        plt.title(f"Saved Run — {len(saved_times)} samples ({saved_times[-1]:.2f}s)")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    except FileNotFoundError:
+        print(f"No saved run found at {DATA_CSV}")
+
 def main():
     global stop_time
 
@@ -190,21 +223,32 @@ def main():
         timeout=0.5,
         )   
 
-    time.sleep(2)
     ser.reset_input_buffer()
-    print(f"Connected to: {ser.portstr}\n")
+    time.sleep(0.3)
+    print(f"Connected to: {ser.portstr}")
+
+    # wait for Teensy to finish setup
+    print("Waiting for Teensy...")
+    while True:
+        line = ser.readline().decode("utf-8").strip()
+        if line == "READY":
+            print("Teensy ready.")
+            break
 
     print("*-*-* Simple Controller Analysis Tool *-*-*")
     print(f"Plots collected data vs. intended response and saves the run to {DATA_CSV}")
     print("Warning: Clears previous data after each run.")
 
+    calc_bw = False
+
     while(True):
         print("\nOptions:")
-        print("1. Waveform Long-Term Durability Test")              # take input waveform and loop it over and over with selected delay
+        print("1. Repeating Waveform Long-Term Durability Test")              # take input waveform and loop it over and over with selected delay
         print("2. Ultimate Strength Test with Blind Ramping")       # generates a ramp over a selected period of time, between two forces. 
                                                                     # also sends a waveform but this waveform doesn't repeat
-        print(f"3. Record, plot, and calculate bandwidth (performs hardcoded {10} -> {110}N step)")      #doesnt generate waveform, just does a hardcoded step
-        print("4. Exit")                                            # quit python program
+        print(f"3. Record, plot, and calculate bandwidth (assumes a {BW_LOW_STEP} -> {BW_HIGH_STEP}N step in {TEST_SEQ_CSV})")
+        print(f"4. Plot previously saved run ({DATA_CSV})")
+        print("5. Exit")                                            # quit python program
         mode = input("Make selection (1/2/3/4): ").strip()
         
         # teensy waits for an enter to start up.
@@ -212,34 +256,64 @@ def main():
             ser.write(b"1\n")
 
             # send initial rest time
-            ser.write(b f"{RAMP_UP_TIME}")
+            ser.write(f"{RAMP_UP_TIME}\n".encode())
 
-            # send delay between repitions of waveform
+            # load waveform from CSV
+            data = []
+            with open(TEST_SEQ_CSV, "r") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if row:
+                        data.append(int(float(row[0]) * 1000))  # scale to int, 3 decimal places
 
+            # mode 1 repeats
+            ser.write(b"True\n")
 
-            # make waveform and send it
-
-
-            # Pack as bytes: e.g. each value as a 2-byte unsigned int
-            payload = struct.pack(f'<{len(data)}H', *data)
-
-            # Send a length header first, then the payload
-            ser.write(struct.pack('<H', len(data)))  # how many elements
-            ser.write(payload)                        # the actual data
+            # send length then payload
+            payload = struct.pack(f'<{len(data)}I', *data)        # I = uint32
+            ser.write(struct.pack('<H', len(data)))
+            ser.write(payload)
 
             break
 
         elif mode == "2":
             ser.write(b"2\n")
-            calc_bw = (mode == "2")
+            calc_bw = False
             break
 
         elif mode == "3":
             ser.write(b"3\n")
+
+            # send initial rest time
+            ser.write(f"{RAMP_UP_TIME}\n".encode())
+
+            # load waveform from CSV
+            data = []
+            with open(TEST_SEQ_CSV, "r") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if row:
+                        data.append(int(float(row[0]) * 1000))  # scale to int, 3 decimal places
+
+            # mode 3 does not repeat
+            ser.write(b"False\n")
+
+            # send length then payload
+            payload = struct.pack(f'<{len(data)}I', *data)        # I = uint32
+            ser.write(struct.pack('<H', len(data)))
+            ser.write(payload)
+
+            calc_bw = True
             break
 
         elif mode == "4":
-            break
+            plot_saved_run()
+            continue
+
+        elif mode == "5":
+            print("Exiting.")
+            ser.close()
+            return
 
         else:
             print("Invalid Selection. Try again.")

@@ -25,6 +25,12 @@
 #define ODRV0_NODE_ID 0
 
 /* -------------------------------------
+ * Tendon Break Settings
+ * ------------------------------------- */
+
+#define KILL_FORCE 2.5    // [N], threshold for when we think the tendon is broken
+
+/* -------------------------------------
  * Control Type
  * ------------------------------------- */
 
@@ -38,7 +44,7 @@
 // CAN bus baudrate. Make sure this matches for every device on the bus
 #define CAN_BAUDRATE 250000
 // #define SPI_BAUDRATE 1000000   -- Manually set inside libraries
-#define SERIAL_BAUDRATE 115200
+#define SERIAL_BAUDRATE 921600
 
 
 /* -------------------------------------
@@ -62,11 +68,11 @@
 // Load Cell calibration factor: (Vref / gain) / (2^23) — tune to your load cell (N/tick)
 const float LOAD_CELL_SCALE  = 0.07007488819976268;
 
-#define MA_WINDOW_SIZE 6   // Moving average filter
-
 /* -------------------------------------
  * Moving Average Variables
  * ------------------------------------- */
+
+#define MA_WINDOW_SIZE 6   // Moving average filter size
 
 float weight_buffer[MA_WINDOW_SIZE] = {0};
 int weight_buffer_index = 0;
@@ -108,7 +114,7 @@ struct ODriveStatus; // hack to prevent teensy compile error
 #endif
 
 /* -------------------------------------
- * Object Instantiation
+ * Motor Object Instantiation
  * ------------------------------------- */
 #ifdef MOTORS_ON
 FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> can_intf;   // Using CAN3 on Teensy
@@ -116,15 +122,16 @@ ODriveCAN odrv0(wrap_can_intf(can_intf), ODRV0_NODE_ID); // Standard CAN message
 ODriveCAN* odrives[] = {&odrv0}; // Make sure all ODriveCAN instances are accounted for here
 #endif
 
-// Load Cell Related
-ADS1220 adc(LOADCELL_CS_PIN, DRDY_PIN);
+
 
 /* -------------------------------------
- * Object Instantiation
+ * Encoder & Loadcell Object Instantiation
  * ------------------------------------- */
 SPIEncoder* AS5047P = nullptr;
 Angle encoder_angle;  // rotations=0, radians=0, direction=1 by default
 
+// Load Cell Related
+ADS1220 adc(LOADCELL_CS_PIN, DRDY_PIN);
 
 /* -------------------------------------
  * Control Loop Timers & Flags
@@ -144,6 +151,10 @@ IntervalTimer control_timer, encoder_timer;
 
 // define control mode
 int test_mode = 0;
+bool repeat_waveform = false;
+float ramp_up_time = 3.0f;    // default
+bool ramp_complete = false;
+
 
 #define MAX_TEST_ARRAY_LEN 25000
 float test_array[MAX_TEST_ARRAY_LEN];
@@ -173,6 +184,7 @@ const float b = 20000.0f;       // Formerly 36750.0f and 100000.0f
 #ifdef PI_CONTROL
 const float kp = 56000.0f;   // N/m stiffness coefficient (thinner -- 33000)
 const float ki = 0.0003f;   // 3800.0f  -- 0.0000125f --> (thinner -- 0.0005f)
+const float kd = 0.0f;       // derivative gain (set to 0 for PI-only control)
 #endif
 
 const float PULLEY_RADIUS = 0.0089f;    // in meters
@@ -222,6 +234,8 @@ void setup() {
     delay(10);
   }
 
+  delay(50);
+  Serial.println("READY");
   Serial.println("Give mode input to begin...");
   while (!Serial.available()) {}   // wait for any input
 
@@ -234,31 +248,52 @@ void setup() {
   Serial.println("Starting...");
 
   // if we need to download data
-  if ((test_mode == 2) || (test_mode == 3)) {
-    Serial.println("Waiting for test array...");
+  if ((test_mode == 1) || (test_mode == 3)) {
 
-    // Wait for the 2-byte length header
-    while (Serial.available() < 2) { }
+    // read ramp up time
+    while (!Serial.available()) {}
+    String ramp_str = Serial.readStringUntil('\n');
+    ramp_str.trim();
+    ramp_up_time = ramp_str.toFloat();
+    Serial.print("Ramp up time: ");
+    Serial.println(ramp_up_time);
+
+    // read repeat flag
+    while (!Serial.available()) {}
+    String repeat_str = Serial.readStringUntil('\n');
+    repeat_str.trim();
+    repeat_waveform = (repeat_str == "True");
+    Serial.print("Repeat waveform: ");
+    Serial.println(repeat_waveform);
+
+    // read 2-byte length header
+    while (Serial.available() < 2) {}
     uint16_t count;
     Serial.readBytes((char*)&count, 2);
 
     if (count > MAX_TEST_ARRAY_LEN) {
         Serial.println("Array too large, aborting");
-        while (true); // halt
+        while (true);
     }
 
+    // read uint32 values, divide by 1000 to restore 3 decimal places
     for (uint16_t i = 0; i < count; i++) {
-        while (Serial.available() < 2) { }
-        uint16_t value;
-        Serial.readBytes((char*)&value, 2);
-        test_array[i] = (float)value;
+        while (Serial.available() < 4) {}
+        uint32_t value;
+        Serial.readBytes((char*)&value, 4);
+        test_array[i] = (float)value / 1000.0f;
     }
 
     test_array_len = count;
     Serial.print("Received ");
     Serial.print(test_array_len);
     Serial.println(" values");
-}
+  }
+
+  if (test_mode == 2) {
+    Serial.println("Mode 2 selected — expecting livestreamed F_ref each control loop.");
+    ramp_complete = true;   // skip ramp/array logic entirely
+  }
 
   /* ---------
    * Configure ODrive
@@ -372,7 +407,7 @@ void loop() {
 
   // Establish first loop time
   if (first_loop){
-    time_zero = micros();   // for tracking the sine wave
+    time_zero = micros();   // for tracking wave ramp up among other things
     first_loop = false;
   }
 
@@ -401,33 +436,31 @@ void loop() {
 
   now_us = micros();
 
-  //
-
-  // If it's a bandwidth test, then we just do a hardcoded step
-  if (test_mode == 3){
-    
-    
-    if ((now_us - time_zero)/1000000.0f >= 5.0f){
-      
-      /*
-      if (!sine_started) {
-        period_begin = now_us;    // record once when sine starts
-        sine_started = true;
+  if (test_mode == 2) {
+    // livestreamed F_ref — read latest value sent by Python this loop
+    if (Serial.available()) {
+      String live_str = Serial.readStringUntil('\n');
+      live_str.trim();
+      if (live_str.length() > 0) {
+        F_ref = live_str.toFloat();
       }
-      float t = (now_us - period_begin) / 1000000.0f;   // seconds since sine started
-      F_ref = (50.0f * sinf((PI / 0.1f) * t)) + 60.0f;
-      */
-      
-      F_ref = 110.0f;
-    } else {
-      F_ref = 60.0f;
     }
-  }
 
   if (control_loop){
 
-    // Query the test_array for F_ref
-    F_ref = test_array[test_array_index]
+    if (!ramp_complete) {
+      if ((now_us - time_zero) < (unsigned long)(ramp_up_time * 1e6f)){
+        F_ref = test_array[0];   // hold at starting value
+      } 
+      else{
+        ramp_complete = true;
+      }
+    }
+    else{
+      // Query the test_array for F_ref
+      F_ref = test_array[test_array_index];
+    }
+
 
     /* ---------
     * Admittance Control
@@ -557,11 +590,11 @@ void loop() {
       Serial.println("False");    // Otherwise, we just go with false and keep program alive
     }
 
-    // Increment kill sequence -- current force is less than 2.5. 
-    // It backs off by 0.2 seconds if it reads force over 2.5 N
-    // If the force is less than 2.5 N, then we add to kill count.
-    // If force is below 2.5N for 1 sec, then we kill the program.
-    if ((weight_filtered/1000 * 9.80665f) < 2.5){
+    // Increment kill sequence -- current force is less than KILL_FORCE. 
+    // It backs off by 0.2 seconds if it reads force over KILL_FORCE
+    // If the force is less than KILL_FORCE, then we add to kill count.
+    // If force is below KILL_FORCE for 1 sec, then we kill the program.
+    if ((weight_filtered/1000 * 9.80665f) < KILL_FORCE){
       kill_counter += 1;
     }
     else{
@@ -578,17 +611,17 @@ void loop() {
     * Testing Array Increment
     */
 
-    // increment through the testing array
-    test_array_index = test_array_index + 1;
+    if (ramp_complete) {
+      // increment through the testing array
+      test_array_index = test_array_index + 1;
 
-    // do we need to reset the test_array loop?
-    // yes, but we do not repeat the waveform
-    if ((test_array_index >= test_array_len) && repeat_waveform == false){
-      test_array_index = test_array_len - 1;    // hold at the final value
-    }
-    // reset test_array and waveform repeats
-    else if ((test_array_index >= test_array_len) && repeat_waveform == true){
-      test_array_index = 0;
+      // do we need to reset the test_array loop?
+      if ((test_array_index >= test_array_len) && repeat_waveform == false){
+        test_array_index = test_array_len - 1;    // hold at the final value
+      }
+      else if ((test_array_index >= test_array_len) && repeat_waveform == true){
+        test_array_index = 0;
+      }
     }
 
     // reset the control loop state

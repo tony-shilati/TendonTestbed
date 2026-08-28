@@ -198,6 +198,26 @@ def plot_saved_run():
     except FileNotFoundError:
         print(f"No saved run found at {DATA_CSV}")
 
+def stream_force(ser, force_func, duration, stop_event, rate_hz=1000):
+    """
+    Generic F_ref streaming function.
+    force_func(t) -> float  returns the desired force at time t [s] since start.
+    duration: total time to stream for [s]. Use float('inf') for indefinite streaming.
+    rate_hz: how often to send a new value.
+    """
+
+    t0 = time.time()
+    period = 1.0 / rate_hz
+
+    while not stop_event.is_set():
+        t = time.time() - t0
+        if t >= duration:
+            break
+
+        f_ref = force_func(t)
+        ser.write(b'\xAA' + struct.pack('<f', f_ref))  # sync byte + float32
+        time.sleep(period)
+
 def main():
     global stop_time
 
@@ -278,6 +298,13 @@ def main():
 
         elif mode == "2":
             ser.write(b"2\n")
+
+            start_force = float(input("Start force [N]: "))
+            end_force   = float(input("End force [N]: "))
+            ramp_time   = float(input("Ramp duration [s]: "))
+
+            force_func = make_ramp(start_force, end_force, ramp_time)
+
             calc_bw = False
             break
 
@@ -329,6 +356,15 @@ def main():
     # start threading to collect data until user defines stop point
     thread = threading.Thread(target=collect_until_stop, args=(ser, data_times, data_forces, data_intended), daemon=True)
     thread.start()
+
+    # if mode 2, also start the F_ref streaming thread
+    if mode == "2":
+        stream_thread = threading.Thread(
+            target=stream_force,
+            args=(ser, force_func, ramp_time + 5.0, stop_event),
+            daemon=True
+        )
+        stream_thread.start()
 
     def wait_for_enter():
         input("Recording... press Enter to stop.\n")

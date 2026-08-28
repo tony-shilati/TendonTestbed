@@ -445,20 +445,26 @@ void loop() {
         F_ref = live_str.toFloat();
       }
     }
+  }
 
   if (control_loop){
 
-    if (!ramp_complete) {
-      if ((now_us - time_zero) < (unsigned long)(ramp_up_time * 1e6f)){
-        F_ref = test_array[0];   // hold at starting value
-      } 
-      else{
-        ramp_complete = true;
+    //If it's a stored loop protocol
+    if ((test_mode == 3) || (test_mode == 1)){
+      if (!ramp_complete) {
+        // do the ramp up as communicated by user
+        if ((now_us - time_zero) < (unsigned long)(ramp_up_time * 1e6f)){
+          F_ref = test_array[0];   // hold at starting value
+        } 
+        else{
+          ramp_complete = true;
+        }
       }
-    }
-    else{
-      // Query the test_array for F_ref
-      F_ref = test_array[test_array_index];
+      // after ramping is done
+      else{
+        // Query the test_array for F_ref (most common outcome)
+        F_ref = test_array[test_array_index];
+      }
     }
 
 
@@ -484,7 +490,7 @@ void loop() {
     #endif
 
     /* ---------
-    * PID Control
+    * PI Control
     */
     #ifdef PI_CONTROL
     delta_F = F_ref - (weight_filtered/1000 * 9.80665f);
@@ -611,7 +617,7 @@ void loop() {
     * Testing Array Increment
     */
 
-    if (ramp_complete) {
+    if ((ramp_complete) && ((test_mode == 3) || (test_mode == 1))){
       // increment through the testing array
       test_array_index = test_array_index + 1;
 
